@@ -1,0 +1,13 @@
+**
+!Dockerfile
+!.dockerignore
+!pyproject.toml
+!uv.lock
+!README.md
+!src/
+!src/**
+!tests/
+!tests/fixtures/
+!tests/fixtures/synthetic-scenarios.json
+**/__pycache__/
+**/*.py[cod]

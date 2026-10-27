@@ -1,0 +1,38 @@
+{
+  "schema_version": 1,
+  "scenarios": [
+    {
+      "scenario_id": "synthetic-duel-1",
+      "source": {
+        "demo_sha256": "0000000000000000000000000000000000000000000000000000000000000000",
+        "round_number": 1,
+        "snapshot_tick": 100,
+        "contact_tick": 101,
+        "death_tick": 120,
+        "parser_name": "synthetic",
+        "parser_version": "fixture-v1",
+        "rules_version": "fixture-v1"
+      },
+      "map": {
+        "name": "de_synthetic",
+        "game_build": 1,
+        "revision": "synthetic-not-playable"
+      },
+      "player": {
+        "steam_id": "76561198000000001",
+        "side": "T",
+        "position": {"x": 1.0, "y": 2.0, "z": 3.0},
+        "view_angles": {"pitch": 0.0, "yaw": 45.0, "roll": 0.0},
+        "weapon": "ak47"
+      },
+      "opponent": {
+        "steam_id": "76561198000000002",
+        "side": "CT",
+        "position": {"x": 4.0, "y": 5.0, "z": 6.0},
+        "view_angles": {"pitch": 0.0, "yaw": -135.0, "roll": 0.0},
+        "weapon": "m4a1"
+      },
+      "limitations": ["synthetic_not_playable", "smoke_not_evaluated", "flash_not_evaluated"]
+    }
+  ]
+}
