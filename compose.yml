@@ -1,0 +1,62 @@
+x-app: &app
+  build:
+    context: .
+    dockerfile: Dockerfile.web
+  env_file: .env
+  environment:
+    PGHOST: db
+    WORK_ROOT: /work
+  depends_on:
+    db:
+      condition: service_healthy
+  init: true
+  read_only: true
+  tmpfs:
+    - /tmp:size=64m,mode=1777
+  cap_drop: [ALL]
+  security_opt: [no-new-privileges:true]
+
+services:
+  db:
+    image: postgres:16
+    environment:
+      POSTGRES_DB: ${PGDATABASE:-trainer}
+      POSTGRES_USER: ${PGUSER:-trainer}
+      POSTGRES_PASSWORD: ${PGPASSWORD:?Set PGPASSWORD in .env}
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U \"$${POSTGRES_USER}\" -d \"$${POSTGRES_DB}\""]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+    volumes:
+      - database:/var/lib/postgresql/data
+    mem_limit: 1g
+
+  web:
+    <<: *app
+    ports: ["127.0.0.1:8000:8000"]
+    mem_limit: 768m
+    cpus: 1
+    pids_limit: 128
+
+  worker:
+    <<: *app
+    command: ["cs-map-trainer-web", "qcluster"]
+    volumes: [scratch:/work]
+    mem_limit: 5g
+    cpus: 2
+    pids_limit: 128
+    restart: on-failure
+
+  maintenance:
+    <<: *app
+    command: ["cs-map-trainer-web", "maintain_uploads", "--loop"]
+    volumes: [scratch:/work]
+    mem_limit: 256m
+    cpus: 0.5
+    pids_limit: 64
+    restart: on-failure
+
+volumes:
+  database:
+  scratch:

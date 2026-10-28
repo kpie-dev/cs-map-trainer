@@ -80,6 +80,54 @@ def _demo_command(args: argparse.Namespace) -> int:
     return 0
 
 
+def _training_command(args: argparse.Namespace) -> int:
+    from cs_map_trainer.artifacts import write_new_file
+    from cs_map_trainer.exporting import (
+        BOT_ENTITY_INDEX,
+        BOT_PLAYER_INDEX,
+        COMPATIBILITY,
+        ExportError,
+        export_scenario,
+    )
+    from cs_map_trainer.packs import build_pack, load_scenarios, select_scenarios
+
+    try:
+        document = load_scenarios(args.path.read_bytes())
+        if args.command == "export-scenario":
+            selected = select_scenarios(document, include=[args.scenario_id])
+            exported = export_scenario(selected.scenarios[0])
+            output = (exported.cfg if args.cfg else exported.console_line + "\n").encode("utf-8")
+        else:
+            output = build_pack(
+                document,
+                include=args.include,
+                reject=args.reject,
+                include_cfg=args.include_cfg,
+            ).archive
+        if args.output is None:
+            sys.stdout.write(output.decode("utf-8"))
+        else:
+            write_new_file(args.output, output)
+    except (OSError, ExportError) as error:
+        print(f"Training export failed: {error}", file=sys.stderr)
+        return 1
+    except ValidationError as error:
+        print("Invalid training input:", file=sys.stderr)
+        for issue in error.errors(include_input=False, include_url=False):
+            location = ".".join(str(part) for part in issue["loc"]) or "document"
+            print(f"  {location}: {issue['msg']}", file=sys.stderr)
+        return 1
+    print(
+        f"Experimental export: {COMPATIBILITY}. Assumed bot player index {BOT_PLAYER_INDEX} "
+        f"AND pawn entity index {BOT_ENTITY_INDEX}; eyes, spawn, ordering, weapons "
+        "and map geometry are unverified. "
+        "Isolated local Yprac Mirage/Sandbox only; existing bots and session settings "
+        "will be changed. See the pack manifest and instructions.",
+        file=sys.stderr,
+    )
+    return 0
+
+
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(
         prog="cs-map-trainer",
@@ -107,10 +155,30 @@ def main(argv: list[str] | None = None) -> int:
         if name == "benchmark":
             command.add_argument("--runs", type=_positive_int, default=3)
             command.add_argument("--timeout-seconds", type=_positive_int, default=300)
+    export = commands.add_parser(
+        "export-scenario", help="Export one experimental, unverified Yprac console sequence"
+    )
+    export.add_argument("path", type=Path, help="Scenario document v1 or analysis report v2")
+    export.add_argument("--scenario-id", required=True)
+    export.add_argument("--cfg", action="store_true", help="Emit optional CFG instead of one line")
+    export.add_argument("--output", type=Path, help="Write to a new file instead of stdout")
+    pack = commands.add_parser(
+        "build-pack", help="Build an experimental Yprac ZIP with manifest and instructions"
+    )
+    pack.add_argument("path", type=Path, help="Scenario document v1 or analysis report v2")
+    pack.add_argument("--include", action="append", help="Include an ID; repeat for more IDs")
+    pack.add_argument("--reject", action="append", help="Reject an ID; repeat for more IDs")
+    pack.add_argument(
+        "--include-cfg", action="store_true", help="Include optional per-scenario CFG"
+    )
+    pack.add_argument("--output", type=Path, required=True, help="Write ZIP to a new file")
     args = parser.parse_args(argv)
 
     if args.command in ("players", "analyze", "benchmark"):
         return _demo_command(args)
+
+    if args.command in ("export-scenario", "build-pack"):
+        return _training_command(args)
 
     if args.command == "schema":
         print(json.dumps(ScenarioDocument.model_json_schema(), indent=2))

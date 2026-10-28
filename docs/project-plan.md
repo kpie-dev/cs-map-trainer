@@ -30,7 +30,12 @@ nie są zgadywane. Ta sama reguła obowiązuje dla porównywalnych wygranych.
 Benchmark uruchamia każdą próbę w nowym procesie i nie deklaruje wyczyszczenia cache.
 Pipeline sprawdzono na publicznych demach Valve i FACEIT z dogrywką;
 pełny benchmark na docelowym VPS i ocena trenera
-pozostają otwarte. Nie ma eksportera ani portalu. Uruchomienie opisuje
+pozostają otwarte. Jest prototyp eksportera Yprac i paczek ZIP z CLI
+`export-scenario`/`build-pack`, bez treningowego UI i potwierdzenia importu w grze.
+Minimalny backend Django/PostgreSQL/Django-Q2 już istnieje: konta e-mail,
+Steam OpenID, intake R2, kwoty na SteamID, jednorazowa analiza, historia
+i sprzątanie. Rzeczywiste integracje R2/Steam/SMTP wymagają odbioru.
+Uruchomienie opisuje
 `../README.md`, a wymaganą próbę w grze `integration-validation.md`.
 Poprawność dokumentu JSON nie potwierdza importu.
 
@@ -54,8 +59,10 @@ integracji; G1 pozostaje otwarte, ale nie jest zależnością prac implementacyj
 Nowy trop do próby: `setpos_player <player_index> <x> <y> [z]`.
 Użytkownik wskazał składnię z Valve Developer Community; chodzi o indeks
 gracza, nie `userid` z `status`. Usunięcie botów i dodanie jednego może
-ułatwić przewidywalny wybór indeksu, ale indeks `2`, gotowość bota oraz
-działanie w Yprac nie są potwierdzone. Szczegóły próby i pochodzenie
+ułatwić przewidywalny wybór indeksu. Prototyp przyjmuje indeks gracza `2`,
+a na osobno zaakceptowanej hipotezie również indeks encji/pawn `2`
+do nadania `targetname` i teleportu. Żaden z indeksów, gotowość bota ani
+działanie w Yprac nie są potwierdzone w grze. Szczegóły próby i pochodzenie
 ustalenia są w `integration-validation.md`.
 
 Przed rozpoczęciem zadania przeczytać właściwe sekcje i sprawdzić jego zależności. Dokument aktualizować przy zmianach zakresu, decyzjach technicznych oraz potwierdzeniu lub odrzuceniu hipotez. Nie traktować proponowanego rozwiązania jako działającego bez dowodu opisanego w kryteriach przejścia.
@@ -76,12 +83,16 @@ na istniejącym parserze i kontrakcie, następnie zbudować UI.
 | Fundament projektu | Python 3.11+, pakiet, `uv`, lockfile, przypięty Awpy 3.1.1 | `pyproject.toml`, `uv.lock`, `src/cs_map_trainer/` |
 | Kontrakt scenariuszy | Wersja 1, walidacja typów, pozycji, kątów, ticków, stron i uczestników; syntetyczny przykład | `scenarios.py`, `tests/fixtures/synthetic-scenarios.json` |
 | CLI | `players`, `analyze`, `benchmark`, `validate-scenarios`, `schema`; JSON na stdout lub do nowego pliku bez nadpisywania | `cli.py` |
+| Eksport prototypowy Yprac | `export-scenario`: jedna linia lub opcjonalny CFG; walidacja mapy/broni/liczb, stałe komendy; indeksy gracza i encji `2` jako osobne założenia, orientacja przez `point_teleport`, status `unverified_in_game` | `exporting.py`, `cli.py` |
+| Paczki treningowe | `build-pack`: wybór/odrzucanie po ID, ZIP z manifestem, scenariuszami, instrukcją, osobnymi TXT i opcjonalnym CFG; raport v2 lub dokument v1, zapis bez nadpisywania | `packs.py`, `artifacts.py`, `cli.py` |
 | Parser | Nieskompresowane CS2 `.dem` do 1 GiB, tylko `de_mirage`; skład, rundy, zgony, obrażenia i zbiorcze migawki; hash wejścia i jawne błędy | `parsing.py` |
 | Analiza | Wspólny tick sprzed obrażeń, pozycje i dostępne kąty obu stron; brakujący pitch/yaw przeciwnika przybliżany kierunkiem ku graczowi z jawnym oznaczeniem; wykluczenia i grupowanie z kontekstem | `analysis.py` |
 | Statystyki | Raport `analysis_version: 2`; porównywalne wygrane i przegrane, liczebność próby, win rate tylko w przefiltrowanych rozstrzygniętych starciach; ranking według liczby porażek | `analysis.py` |
 | Benchmark | Każdy przebieg w nowym procesie; czas, CPU, RSS, operacje blokowe I/O, rozmiar JSON, timeout i kontrola identyczności wyników; bez fałszywej deklaracji cold cache | `benchmark.py` |
 | Docker | Wieloetapowy obraz CLI, użytkownik bez roota, zależności wykonawcze z lockfile, dane przez bind mount; bez serwera WWW | `Dockerfile`, `.dockerignore`, `README.md` |
 | Testy i CI | Testy jednostkowe, opt-in integracja na lokalnym demie, workflow lint/format/test/build; zdalny wynik GitHub Actions nie był tu potwierdzany | `tests/`, `.github/workflows/ci.yml` |
+| Minimalny backend | Django/PostgreSQL, e-mail + Steam OpenID, prywatny multipart R2, kwoty 3/7 dni na SteamID, Q2, jednorazowy worker i prywatne wyniki/skrypty | `web/`, `tests/web/` |
+| Usuwanie wejść | Po pierwszej próbie, także błędnej; osobny reaper i ponawianie usuwania, wygaśnięcie porzuconych wejść, usuwanie historii/konta | `web/tasks.py`, `web/services.py` |
 
 Ścieżki modułów w tabeli odnoszą się do `src/cs_map_trainer/`.
 Lokalnie sprawdzono pipeline na publicznych, zweryfikowanych checksumami demach
@@ -100,6 +111,12 @@ To nie jest ręczna weryfikacja każdego kontaktu ani benchmark docelowego VPS.
 | Awaryjna orientacja przeciwnika | Zaimplementowana w `analysis.py`, reguły `damage-window-v3`: tylko brakujący pitch/yaw jest wyliczany ku pozycji gracza ze wspólnej migawki; dostępne kąty są zachowane |
 | Jawność przybliżenia i porównywalność | Scenariusz i kontekst grupy zawierają `opponent_aim_inferred_toward_player`; grupy przybliżone są oddzielone od kompletnych. Identyczne zasady dla wygranych i przegranych; raport pozostaje v2, scenariusze v1 |
 | Regresja i dokumentacja orientacji | Dodano testy brakujących pól i częściowych kątów, osi i wysokości, zachowania oryginalnego celowania, błędnych danych, nieokreślonego kierunku oraz grupowania wygranych/przegranych. Dostosowano test integracyjny, README i protokół G1; testy jednostkowe i lint/format przeszły, integrację na demie pominięto z powodu braku lokalnej próbki |
+| Eksporter i paczki z CLI | Zaimplementowano prototyp `yprac-sandbox-prototype-v1`, walidację, jeden tekst ustawienia na scenariusz, opcjonalny CFG, selekcję/odrzucanie i ZIP z manifestem; testy jednostkowe/CLI, lint/format i build przeszły. Integrację na demie pominięto bez próbki; próby Yprac nie wykonano |
+| Weryfikacja iteracji eksportera/paczek | Zaliczone 294 testy; 1 test integracyjny pominięty z powodu braku lokalnego dema. Sprawdzono także przepływ analiza → eksport bez ponownego parsowania, lint/format, budowanie sdist/wheel i obecność nowych modułów w wheel |
+| Review zmian eksportera/paczek | Zakończone bez zgłoszonych istotnych błędów ani regresji w eksporterze, selekcji, ZIP, zapisie artefaktów i CLI. Osobno zaakceptowane hipotezy indeksów gracza/encji `2` pozostają założeniami prototypu. Review nie potwierdza działania w grze ani nie zamyka G1 |
+| Fundament backendu | Dodano Django/PostgreSQL/Django-Q2, R2, konta/Steam, kwoty na SteamID, jednorazową analizę i prywatną historię. 58 testów backendu na PostgreSQL; cała regresja: 352 zaliczone, 2 pominięte (demo i prawdziwe R2). Lint/format/build, checks i migracje przeszły; sprawdzono HTTP logowania i ochronę historii. Compose config poprawny, daemon Docker niedostępny; R2/Steam/SMTP i obraz wymagają odbioru |
+| Poprawki review backendu | Dodano dziedziczoną blokadę wolumenu i ochronę parsera po śmierci rodzica. Ograniczono profil Steam przed lookup allauth, również przy ponownym/odrzuconym łączeniu; migracja `0002_minimize_steam_profiles` oczyszcza starsze zapisy. Po poprawkach: 69 testów backendu, 363 zaliczone w całej regresji, 2 pominięte integracje; lint/format/build, checks i migracje bez błędów |
+| Ponowne review backendu | Zakończone bez nowych istotnych błędów w poprawkach parsera, kolejce, minimalizacji Steam i migracji. Review odczytowe, bez ponownego uruchamiania regresji; nie potwierdza kontenera Linux ani rzeczywistych R2/Steam/SMTP |
 
 Przybliżenie kierunku zakłada jednakową wysokość oczu stojących uczestników.
 Nie zastępuje brakującej pozycji, nie naprawia nieprawidłowych kątów i nie
@@ -109,24 +126,31 @@ decyzją nie blokuje to backendu i UI; weryfikacja nastąpi na końcu.
 
 ### Czego jeszcze nie ma
 
-Nie ma eksportera komend/CFG, działającego importu do Yprac, wyboru i odrzucania
-sytuacji w osobnym przepływie CLI, paczek z instrukcjami i manifestem zgodności,
-ocen treningu ani kolejki powtórek. Nie ma też portalu, kont, uploadu, bazy danych,
-kolejki zadań, produkcyjnego workera i płatności. Raport JSON nie jest skryptem
-treningowym i nie należy go przedstawiać jako gotowego produktu.
+Nie ma potwierdzonego działającego importu do Yprac, ocen treningu ani kolejki
+powtórek. Eksporter, selekcja CLI i paczki są implementacją prototypową na
+zaakceptowanych założeniach, nie dowodem integracji. Minimalny backend ma już
+konta, upload, bazę, kolejkę, izolowany proces parsera i prywatną historię.
+Nie ma treningowego UI, selekcji i autoryzowanych paczek WWW, płatności ani
+pełnego wdrożenia TLS/backup/monitoring. Prawdziwe R2/Steam/SMTP oraz obraz
+Compose nie są potwierdzone lokalną próbą. Nie przedstawiać tego jako gotowego produktu.
 
 ### Od czego zacząć następny wątek
 
 1. Przeczytać ten dokument, `README.md` oraz `docs/integration-validation.md`.
    Obejrzeć istniejący kod i stan Git; nie usuwać zastanych zmian.
-2. Zaimplementować jeden eksporter Yprac i składanie paczek na zaakceptowanych
-   założeniach komend: automatyczne ustawienie obu stron po jednym wklejeniu,
-   walidacja danych, manifest, jawny status zgodności i testy generowanego wyjścia.
-3. Ustalić polityki minimalnego backendu i zbudować Django/PostgreSQL:
-   prywatny upload, wybór gracza, asynchroniczna analiza, wyniki, wybór/odrzucanie
-   sytuacji, paczki i autoryzowany dostęp. Wykorzystać istniejące moduły CLI.
+2. Wykorzystać istniejące `exporting.py`, `packs.py` i polecenia CLI, nie
+   implementować eksportera od nowa. Prototyp stosuje jawne założenia indeksu
+   gracza `2`, osobno indeksu encji `2`, orientacji przez `point_teleport`
+   i kolejności wykonania. Zachować `unverified_in_game` do końcowych prób.
+3. Dokończyć odbiór R2/Steam/SMTP z prawdziwą konfiguracją. Rozszerzyć istniejący
+   minimalny backend o wybór/odrzucanie sytuacji, paczki i autoryzowany eksport.
+   Wykorzystać `select_scenarios` i `build_pack` oraz zapisane raporty, bez
+   ponownego parsowania usuniętych dem. Przetestować cudze/usunięte wyniki,
+   błędne ID, pusty wybór i nieobsługiwany eksport. Poprawki review są zamknięte;
+   nie przepisywać Django ani intake. Przy wdrożeniu zastosować migrację
+   `0002_minimize_steam_profiles` i odebrać cykl życia parsera w kontenerze Linux.
 4. Po backendzie zbudować UI na szablonach Django: upload, status zadania,
-   wybór gracza, raport, wybór sytuacji i kopiowanie komend jednym przyciskiem.
+   powiązanie Steam, raport, wybór sytuacji i kopiowanie komend jednym przyciskiem.
 5. Sprawdzić aplikację automatycznie, następnie wykonać końcowe próby w CS2/Yprac:
    jedna sytuacja, potem 10, orientacja obu stron, broń, restart i jedno wklejenie.
    Brak próby oznacza „niezweryfikowane w grze”, nie zakaz implementacji.
@@ -151,7 +175,9 @@ produktu, ale nie blokują budowy aplikacji. Python pozostaje wybranym stosem.
 ## Uzgodniony zakres
 
 - Pierwszy odbiorca: gracz indywidualny, model freemium z niedrogą subskrypcją. Równolegle kontakt z trenerami słabszych drużyn i akademii jako partnerami walidującymi i kanałem sprzedaży.
-- Użytkownik podał 3 dema tygodniowo jako przykładowy darmowy limit, nie jako zatwierdzony wymóg.
+- Zatwierdzono limit minimalnego backendu: 3 przyjęte dema na zweryfikowany
+  SteamID w ruchomych 7 dniach, nie na konto e-mail. 1 GiB pozostaje technicznym
+  limitem pojedynczego pliku, nie kwotą rozliczeniową.
 - Rdzeń MVP łączy prostą analizę i odtworzenie pozycji z konkretnych przegranych pojedynków. Same ogólne zalecenia lub dobór gotowego ćwiczenia nie wystarczą.
 - Użytkownik akceptuje istniejący klient Yprac. Preferuje skopiowanie komend
   do konsoli zamiast umieszczania pobranych plików w katalogu klienta; `.cfg`
@@ -222,24 +248,24 @@ konsoli CS2 na interfejs Yprac bez sprawdzenia jego możliwości.
 
 ### Etap BE — następna implementacja
 
-1. Eksporter jednego scenariusza i paczek: inicjalizacja jednego bota,
+1. Gotowy prototyp eksportera jednego scenariusza i paczek: inicjalizacja jednego bota,
    `setpos_player` z indeksem gracza, pozycje/kąty i broń obu stron,
    zapis/odczyt oraz jedno wklejenie do konsoli. Poprawność mechanizmu,
    w tym przyjętego indeksu bota, traktować jako założenie do końcowej próby,
    nie jako już uzyskany dowód. Szczegóły komend utrzymać w jednym module.
-2. Selekcja i odrzucanie sytuacji, manifest paczki, instrukcja i wersjonowanie
+2. Gotowe: selekcja i odrzucanie sytuacji, manifest paczki, instrukcja i wersjonowanie
    eksportera. Walidować liczby, broń, mapę i dozwolone komendy; nie emitować
    nazw/tekstu z dema jako kodu. Nie nadpisywać bindów ani `autoexec.cfg`.
-3. Wybrać polityki storage/auth/limitów/retencji i zbudować backend Django,
-   PostgreSQL, Django-Q2 ORM oraz izolowany worker. Obsłużyć prywatny upload,
-   skład, wybór gracza, analizę, raporty i autoryzowane paczki.
-4. Dodać testy kontraktów, eksportera, zadań, uprawnień, retry i limitów.
+3. Gotowy fundament Django/PostgreSQL/Django-Q2, R2, konta/Steam, kwoty,
+   jednorazowy worker i historia. Dokończyć odbiór usług zewnętrznych,
+   następnie dodać selekcję oraz autoryzowane paczki WWW.
+4. Rozszerzać testy kontraktów, zadań, uprawnień, duplikatów i limitów.
    G2 oznacza gotowość backendu, nie potwierdzenie treningu w grze.
 
 ### Etap UI — po backendzie
 
 Szablony Django, opcjonalnie HTMX: upload i błędy wejścia, status zadania,
-wybór gracza, raport z ograniczeniami i przybliżonymi kątami, wybór/odrzucanie
+powiązanie Steam, raport z ograniczeniami i przybliżonymi kątami, wybór/odrzucanie
 sytuacji, zapis paczki i przycisk kopiowania pełnego ustawienia scenariusza.
 Jeden scenariusz aktywny naraz; bez ręcznego indeksu bota i przepisywania
 wielu komend. Dodać deklarowane oceny/powtórki i testy przepływu aplikacji.
@@ -301,12 +327,12 @@ Bez integracji zwrotnej wykonanie i trudność są deklaracją użytkownika, nie
 
 Poza MVP: pełne odtwarzanie akcji 5v5, dynamiczne ścieżki wszystkich botów, automatyczna ocena strategii, własny aim trainer, własny klient desktopowy, renderowanie filmów, analiza voice comms, scraping dem z kont graczy oraz rozbudowany panel organizacji.
 
-## Wybrany kierunek backendu i UI — jeszcze niezaimplementowany
+## Kierunek backendu i UI — minimalny backend zaimplementowany
 
 ```text
 Przeglądarka
-  -> Django: sesja, upload, wybór gracza, raport, pobranie
-  -> prywatny storage S3/R2: upload dema
+  -> Django: e-mail, sesja, powiązanie Steam, rezerwacja uploadu, historia
+  -> prywatny Cloudflare R2 Standard: bezpośredni upload dema
 
 Django -> PostgreSQL: użytkownicy, uprawnienia, zadania, wyniki, powtórki
        -> kolejka Django-Q2 z brokerem ORM w tym samym PostgreSQL
@@ -320,8 +346,11 @@ Django -> PostgreSQL: użytkownicy, uprawnienia, zadania, wyniki, powtórki
 - Django z szablonami; HTMX tylko tam, gdzie upraszcza status zadania lub interakcję. Auth, sesje, ORM i panel administracyjny w jednym stosie. Nie dokładać Next.js i osobnego API bez potrzeby produktu.
 - PostgreSQL od wdrożenia współdzielonego przez web i workera. Bez osobnego Redis/Celery na start: Django-Q2 dokumentuje broker ORM jako dogodny dla umiarkowanej liczby zadań.
 - Jeden mały VPS w UE, Docker Compose, reverse proxy z TLS i jeden worker parsujący na początku. Przed zakupem dobrać RAM na podstawie pomiarów, nie samej wielkości pliku.
-- Pliki poza bazą. R2 jest kandydatem dzięki zgodności S3 i brakowi opłat za egress z samego R2. Na ściśle zamknięty pilot można użyć lokalnego dysku VPS z twardą kwotą, jeśli potwierdzono pojemność i zaakceptowano ryzyko utraty odtwarzalnych plików.
-- Nie utrzymywać dwóch wariantów storage w pierwszej implementacji: wybrać jeden po pomiarze pilota.
+- Wybrano jeden prywatny R2 Standard przez API S3, bez lokalnego storage jako
+  alternatywy. Lokalny plik istnieje tylko podczas pracy parsera. Historia
+  raportów, scenariuszy i komend znajduje się w PostgreSQL.
+- Dema usuwać po pierwszej próbie, także po błędzie; nowa analiza wymaga
+  ponownego uploadu. Historia nie wygasa automatycznie, użytkownik może ją usunąć.
 - FastAPI ma sens, jeśli wykonawca już ma gotowy frontend i infrastrukturę auth/admin. W pustym projekcie oznacza więcej elementów do samodzielnego złożenia.
 - Brak LLM, GPU, Kubernetes, ClickHouse, wektorowej bazy i własnej infrastruktury gry w podstawowym wariancie.
 - Do pilota wystarczy zewnętrzny link płatniczy i ręczne nadanie dostępu. Automatyczny abonament i webhooki dopiero po potwierdzeniu płatności.
@@ -335,6 +364,17 @@ Django -> PostgreSQL: użytkownicy, uprawnienia, zadania, wyniki, powtórki
 - `practice_reviews`: deklaracja wykonania/trudności, odrzucenie oraz następna powtórka.
 - Konta i uprawnienia przez Django; uprawnienia do płatnej funkcji jako prosty, jawny stan.
 
+Zaimplementowano minimalne `SteamIdentity` i `Upload` (obejmuje rezerwację,
+zadanie i wynik). Nie dodawać osobnych tabel na każdy planowany moduł, dopóki
+nie wymagają tego następne etapy. Rejestracja e-mail/hasło wymaga potwierdzenia
+adresu, potem połączenia Steam przez OpenID. Provider allauth potrzebuje klucza
+Steam Web API do profilu; zapisujemy z niego wyłącznie SteamID.
+Powiązanie jest unikalne, bez samodzielnego odpinania. Analiza dotyczy tylko
+powiązanego gracza, którego obecność sprawdzamy w demie. Przyszły pakiet
+trenera/akademii ma analizować różnych zawodników na osobnym uprawnieniu
+i kwocie konta/organizacji, bez konieczności przypisywania każdego SteamID;
+nie implementować go ani płatności w tej iteracji.
+
 Wewnętrzny scenariusz przechowuje: `schema_version`, źródło/rundę/ticki, mapę i jej identyfikatory wersji, punkt oraz orientację gracza, punkt oraz orientację bota, broń, obsługiwane parametry i ograniczenia. Pozycje to światowe XYZ, nie piksele radaru.
 
 To niewielki kontrakt danych oddzielający analizę od jednego eksportera, nie rozbudowany framework pluginów. Pozwala później dodać drugi format bez przepisywania parsera i całej aplikacji.
@@ -347,8 +387,14 @@ To niewielki kontrakt danych oddzielający analizę od jednego eksportera, nie r
 - Nie utrwalać całego tick-by-tick stanu wszystkich graczy, jeśli produkt potrzebuje kilkunastu sytuacji. Selekcja wyjścia zmniejsza wynik i RAM, ale nie gwarantuje proporcjonalnego spadku czasu dekodowania.
 - Mierzyć czas ścienny, łączne CPU-sekundy procesu i wątków, szczyt RSS, I/O i rozmiar wyników na docelowej klasie VPS. Odróżniać pierwszy przebieg od cache.
 - Osobny worker nie może wyczerpać pamięci weba i bazy. Limit procesów, pamięci i wątków parsera/Polars dobrać po pomiarach.
-- Stany zadań muszą być jawne: przyjęte, oczekujące, przetwarzane, gotowe, nieobsługiwane, błędne. Ograniczyć ponowienia i pokazywać przyczynę użytkownikowi.
+- Stany zadań muszą być jawne: przyjęte, oczekujące, przetwarzane, gotowe,
+  nieobsługiwane, błędne i wygasłe. Brak automatycznego retry analizy;
+  ponowienie wymaga nowego uploadu.
 - Dostarczenie zadania może nastąpić ponownie. Przetwarzanie i naliczanie limitu muszą być idempotentne. W Django-Q2 `retry` musi uwzględniać timeout i oczekiwanie wewnątrz kolejki.
+- Atomowy claim pozwala rozpocząć analizę tylko raz; duplikat dostarczenia
+  nie uruchamia parsera. Błędy wejścia zużywają przyjęcie, infrastruktury
+  zwalniają kwotę. Po utracie workera reaper oznacza błąd i usuwa wejście,
+  nie wznawia analizy. Nieudane usuwanie jest osobnym, ponawianym zadaniem.
 - Cache po hashu i wersjach jest optymalizacją wewnętrzną, nie publicznym identyfikatorem wyniku. Nie ujawniać cudzych dem ani raportów przez deduplikację.
 - Niezgodność mapy, brak danych lub brak możliwości eksportu mają kończyć się czytelnym statusem, nie pozornie poprawną paczką.
 
@@ -375,7 +421,10 @@ Poniższe liczby są założeniami do rachunku, NIE benchmarkiem ani ofertą dos
 - Średni upload: 0,25 GB na demo.
 - 3 dema na tydzień to w przybliżeniu 13 dem miesięcznie na aktywnego gracza.
 - Przykładowy pełny pipeline: 60 CPU-sekund na demo. Należy zmierzyć sumę pracy wszystkich wątków; to niekoniecznie 60 sekund oczekiwania użytkownika.
-- Surowe pliki usuwane po analizie, z buforem na retry nieprzekraczającym 24 godzin. Wyniki i scenariusze mają osobną politykę retencji.
+- Surowe pliki usuwane po pierwszej próbie, bez bufora na retry. Wyłącznie
+  porzucone uploady/zadania mają maksymalny okres oczekiwania 24 h; lifecycle
+  R2 jest awaryjnym zabezpieczeniem, nie precyzyjnym zegarem usuwania.
+  Wyniki i skrypty pozostają do usunięcia przez użytkownika lub konto.
 
 | Aktywni darmowi gracze | Dema/miesiąc | Upload/miesiąc | CPU przy przyjętym założeniu | Średni stan surowych plików przy retencji 24 h i równym napływie |
 |---|---:|---:|---:|---:|
@@ -401,7 +450,7 @@ Ograniczenia kosztowe: zamknięty nabór pilota, limity uploadu i liczby zadań,
 - Sprawdzać płatność za faktyczny pakiet i doświadczenie treningu, nie tylko deklarację „fajny pomysł”. Pierwszą ofertą może być jednorazowa paczka zamiast abonamentu.
 - Pomocnicze punkty odniesienia pilota: 20 testerów, połowa uruchamia pierwszy trening, 30% wraca do kolejnej sesji i 5 niezależnych osób płaci docelową cenę. Nie są to zatwierdzone progi go/no-go ani benchmarki rynku. Decyzję o skalowaniu i komercyjnym uruchomieniu podejmuje właściciel na podstawie potwierdzonego treningu, rzeczywistych płatności, kosztów i potrzebnego wsparcia; nie blokuje to implementacji BE/UI.
 - W pilocie potwierdzać uruchomienie treningu obserwacją lub dobrowolnym potwierdzeniem; nie uznawać pobrania pliku za wykonanie ćwiczenia.
-- Hipotezy cennika: Free z 1 albo 3 pełnymi analizami tygodniowo; Pro około 19-29 zł z uczciwym limitem, np. 40 analiz miesięcznie, historią, zapisanymi zestawami i kolejką powtórek. To propozycje do eksperymentu, nie zatwierdzone limity produktu.
+- ; Pro około 19-29 zł z uczciwym limitem, np. 40 analiz miesięcznie, historią, zapisanymi zestawami i kolejką powtórek. To propozycje do eksperymentu, nie zatwierdzone limity produktu.
 - Nie uzależniać pierwszego pełnego doświadczenia z automatycznym ustawieniem botów od płatności. Darmowa próba musi pozwolić ocenić główną wartość.
 - Jeśli gracz nie wraca do treningu, dodatkowy dashboard, LLM czy panel drużyny nie rozwiążą problemu.
 
@@ -427,12 +476,12 @@ ukrytych zależności.
 |---|---|---|---|
 | `bootstrap-cli` | Gotowe | Fundament, kontrakt, walidator, testy, CI i Docker są opisane powyżej | Brak |
 | `benchmark-demo-pipeline` | Częściowo gotowe | Kod i pomiary lokalne gotowe; pozostały ręczne referencje/ocena trenera, przypadki z docelowych dem i benchmark na docelowej klasie VPS wraz z doborem limitów | `bootstrap-cli`; niezależne od eksportera |
-| `build-training-exporter` | Nierozpoczęte; następny krok BE | Jeden eksporter Yprac na zaakceptowanych założeniach: pozycje, kąty, broń, automatyczny bot, jedno wklejenie, walidacja i regresja; jawny status „niezweryfikowane w grze” | `bootstrap-cli`; bez G1 |
-| `assemble-training-packs` | Nierozpoczęte; etap BE | Wybór/odrzucanie sytuacji, paczka osobnych scenariuszy, manifest zgodności i instrukcje; logika współdzielona z CLI i backendem | `build-training-exporter` |
-| `define-saas-policies` | Nierozpoczęte; etap BE | Wybrać jeden storage, auth, limity, retencję i budżety zasobów dla minimalnej aplikacji; płatności nie blokują prac | `bootstrap-cli` |
-| `build-minimal-web` | Nierozpoczęte; backend przed UI | Django, PostgreSQL, prywatny upload, kontrola dostępu, Django-Q2 ORM, idempotencja, rezerwacje i izolowany worker; testy backendu | `define-saas-policies` |
-| `complete-training-backend` | Nierozpoczęte; G2 | Połączyć skład i wybór gracza, analizę, raport, wybór sytuacji, paczki oraz autoryzowany eksport w backendzie; testy przepływu bez uruchamiania gry | `build-minimal-web`, `assemble-training-packs` |
-| `build-training-ui` | Nierozpoczęte; po BE | Szablony Django, opcjonalnie HTMX: upload, status, wybór gracza, raport, selekcja scenariuszy, kopiowanie całego ustawienia jednym przyciskiem, obsługa błędów | `complete-training-backend` |
+| `build-training-exporter` | Gotowy prototyp; bez odbioru w grze | Indeksy gracza i encji `2` są osobnymi hipotezami; `point_teleport` próbuje odtworzyć orientację; oczy/gotowość/kolejność do G1; walidacja i regresja gotowe | `bootstrap-cli`; bez G1 |
+| `assemble-training-packs` | Gotowe — CLI/logika BE | Wybór/odrzucanie, osobne TXT/CFG, ZIP, manifest, instrukcja; współdzielone funkcje, brak nadpisywania; wszystko `unverified_in_game` | `build-training-exporter` |
+| `define-saas-policies` | Gotowe | R2, e-mail + Steam, 3 dema/7 dni na SteamID, jednorazowa analiza, usuwanie dem i prywatna historia do usunięcia przez użytkownika | `bootstrap-cli` |
+| `build-minimal-web` | Kod, poprawki i review gotowe; integracje do odbioru | Django/PostgreSQL, R2, Q2, kwoty, worker i reaper istnieją; do próby prawdziwe R2/Steam/SMTP, migracja profili, kontener Linux/Compose i sizing VPS | `define-saas-policies` |
+| `complete-training-backend` | Nierozpoczęte; następny krok G2 | Rozszerzyć istniejącą analizę i historię o wybór sytuacji, paczki i autoryzowany eksport; gracz wynika z powiązania Steam | `build-minimal-web`, `assemble-training-packs` |
+| `build-training-ui` | Nierozpoczęte; po BE | Szablony Django, opcjonalnie HTMX: konta/Steam, upload, status, raport, selekcja scenariuszy, kopiowanie ustawienia, obsługa błędów | `complete-training-backend` |
 | `wire-personal-training` | Nierozpoczęte; G3 | Połączyć UI z backendem, bezpiecznymi paczkami i deklarowanymi ocenami/powtórkami; automatyczne testy aplikacji | `build-training-ui` |
 | `add-operations-and-billing` | Po aplikacji, przed odbiorem | Compose/TLS, retencja i usuwanie, backup/odtworzenie, monitoring i limity zasobów; automatyczny abonament nadal tylko po osobnej decyzji | `wire-personal-training` |
 | `verify-end-to-end-pilot` | Końcowy etap aplikacyjny | Test upload → raport → paczka → kopiowanie, błędy/retry/limity, uprawnienia, usuwanie, odtworzenie bazy i koszty; bez deklarowania wyniku w grze | `wire-personal-training`, `add-operations-and-billing` |
@@ -449,7 +498,7 @@ wspólnej logiki. Oceny i prosta kolejka powtórek nie są jeszcze zaimplementow
 
 | Bramka | Wymagany dowód | Obecny stan |
 |---|---|---|
-| G2: backend | Eksporter, paczki, upload, wybór gracza, analiza i prywatne wyniki połączone; automatyczne testy BE i jawny status zgodności | Parser/analiza gotowe; reszta do implementacji bez czekania na G1 |
+| G2: backend | Eksporter, paczki, upload, powiązany gracz, analiza i prywatne wyniki połączone; automatyczne testy BE i jawny status zgodności | Fundament Django gotowy; integracje zewnętrzne do odbioru, selekcja/paczki WWW do implementacji bez czekania na G1 |
 | G3: UI i aplikacja | Przepływ od uploadu do kopiowania komend, wybór/odrzucanie sytuacji, deklarowane oceny/powtórki i testy UI | Do wykonania po BE; nie wymaga wcześniejszych płatności ani próby w grze |
 | G1: integracja w grze — po G2/G3 | Jedno wklejenie automatycznie ustawia i powtarza 10 sytuacji w CS2/Yprac; pozycje, oczy, broń i mapa zgodne z protokołem | Odłożone na koniec; poprawność komend przyjęta roboczo, brak dowodu runtime |
 | G4: końcowy odbiór MVP | G2, G3, aplikacyjne E2E i pozytywne G1; sprawdzone błędy/retry, limity, uprawnienia, retencja, odtworzenie bazy i zasoby | Do wykonania po BE/UI; przed deklarowaniem zweryfikowanego treningu |

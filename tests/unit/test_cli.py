@@ -1,13 +1,16 @@
 import json
 import subprocess
 import sys
+from io import BytesIO
 from pathlib import Path
 from types import SimpleNamespace
+from zipfile import ZipFile
 
 import polars as pl
 import pytest
 
 from cs_map_trainer.cli import main
+from cs_map_trainer.exporting import export_scenario
 from cs_map_trainer.scenarios import MapIdentity
 
 FIXTURE = Path(__file__).parents[1] / "fixtures" / "synthetic-scenarios.json"
@@ -144,3 +147,157 @@ def test_existing_output_is_never_overwritten(fake_demo, tmp_path, capsys):
     assert main(["players", "test.dem", "--output", str(output)]) == 1
     assert output.read_text() == "existing"
     assert "Demo processing failed" in capsys.readouterr().err
+
+
+@pytest.fixture
+def training_input(tmp_path, training_document):
+    path = tmp_path / "scenarios.json"
+    path.write_text(training_document.model_dump_json(), encoding="utf-8")
+    return path
+
+
+def test_export_stdout_is_exactly_one_console_line(training_input, training_document, capsys):
+    reference = training_document.scenarios[0]
+    assert (
+        main(["export-scenario", str(training_input), "--scenario-id", reference.scenario_id]) == 0
+    )
+    result = capsys.readouterr()
+    assert result.out == export_scenario(reference).console_line + "\n"
+    assert len(result.out.splitlines()) == 1
+    assert "unverified_in_game" in result.err
+    assert "player index 2 AND pawn entity index 2" in result.err
+
+
+def test_export_optional_cfg_file(training_input, training_document, tmp_path, capsys):
+    reference = training_document.scenarios[0]
+    output = tmp_path / "training.cfg"
+    assert (
+        main(
+            [
+                "export-scenario",
+                str(training_input),
+                "--scenario-id",
+                reference.scenario_id,
+                "--cfg",
+                "--output",
+                str(output),
+            ]
+        )
+        == 0
+    )
+    assert output.read_text() == export_scenario(reference).cfg
+    assert capsys.readouterr().out == ""
+
+
+def test_pack_cli_writes_archive_not_stdout(training_input, tmp_path, capsys):
+    output = tmp_path / "pack.zip"
+    assert (
+        main(
+            [
+                "build-pack",
+                str(training_input),
+                "--include",
+                "synthetic-duel-1",
+                "--include-cfg",
+                "--output",
+                str(output),
+            ]
+        )
+        == 0
+    )
+    with ZipFile(BytesIO(output.read_bytes())) as archive:
+        manifest = json.loads(archive.read("manifest.json"))
+        assert manifest["selected_scenario_ids"] == ["synthetic-duel-1"]
+        assert manifest["compatibility"] == "unverified_in_game"
+        assert "cfg/scenario-0001.cfg" in archive.namelist()
+    result = capsys.readouterr()
+    assert result.out == ""
+    assert "unverified_in_game" in result.err
+
+
+def test_training_cli_accepts_report(training_report, tmp_path, capsys):
+    path = tmp_path / "report.json"
+    path.write_text(training_report.model_dump_json())
+    assert main(["export-scenario", str(path), "--scenario-id", "synthetic-duel-1"]) == 0
+    assert "setpos_player 2" in capsys.readouterr().out
+
+
+@pytest.mark.parametrize("command", ["export-scenario", "build-pack"])
+@pytest.mark.parametrize("kind", ["missing", "invalid", "no-candidates", "synthetic"])
+def test_training_input_errors_do_not_create_output(
+    tmp_path, capsys, training_report, command, kind
+):
+    path = tmp_path / "input.json"
+    if kind == "invalid":
+        path.write_text('{"private": "do-not-echo-this"}')
+    elif kind == "no-candidates":
+        training_report.scenario_document = None
+        training_report.status = "no_eligible_duels"
+        path.write_text(training_report.model_dump_json())
+    elif kind == "synthetic":
+        path = FIXTURE
+    output = tmp_path / "artifact"
+    args = [command, str(path), "--output", str(output)]
+    if command == "export-scenario":
+        args += ["--scenario-id", "synthetic-duel-1"]
+    assert main(args) == 1
+    result = capsys.readouterr()
+    assert result.out == ""
+    assert result.err
+    assert "do-not-echo-this" not in result.err
+    assert "Experimental export:" not in result.err
+    assert not output.exists()
+
+
+@pytest.mark.parametrize("command", ["export-scenario", "build-pack"])
+def test_training_never_overwrites_existing_output(training_input, tmp_path, capsys, command):
+    output = tmp_path / "artifact"
+    output.write_bytes(b"existing")
+    args = [command, str(training_input), "--output", str(output)]
+    if command == "export-scenario":
+        args += ["--scenario-id", "synthetic-duel-1"]
+    assert main(args) == 1
+    assert output.read_bytes() == b"existing"
+    assert "Training export failed" in capsys.readouterr().err
+    assert not list(tmp_path.glob(".cmt-*"))
+
+
+@pytest.mark.parametrize(
+    "options",
+    [
+        ["--include", "missing"],
+        ["--include", "synthetic-duel-1", "--include", "synthetic-duel-1"],
+        ["--reject", "synthetic-duel-1"],
+        ["--include", "synthetic-duel-1", "--reject", "synthetic-duel-1"],
+    ],
+)
+def test_cli_selection_errors(training_input, tmp_path, capsys, options):
+    output = tmp_path / "pack.zip"
+    assert main(["build-pack", str(training_input), "--output", str(output), *options]) == 1
+    assert capsys.readouterr().out == ""
+    assert not output.exists()
+
+
+@pytest.mark.parametrize(
+    "args",
+    [
+        ["build-pack", "input.json"],
+        ["export-scenario", "input.json"],
+    ],
+)
+def test_training_required_arguments_are_usage_errors(args):
+    with pytest.raises(SystemExit) as error:
+        main(args)
+    assert error.value.code == 2
+
+
+def test_pack_filesystem_failure_is_explicit(training_input, tmp_path, capsys):
+    assert (
+        main(
+            ["build-pack", str(training_input), "--output", str(tmp_path / "missing" / "pack.zip")]
+        )
+        == 1
+    )
+    result = capsys.readouterr()
+    assert result.out == ""
+    assert "Training export failed" in result.err

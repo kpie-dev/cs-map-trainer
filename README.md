@@ -6,12 +6,19 @@ przegrane pojedynki**. Wynikiem jest raport JSON z kandydatami do treningu
 przegranych sytuacji i ich ustawieniem przestrzennym. Działa też
 walidator kontraktu scenariuszy v1.
 
-**Nie ma jeszcze eksportu do konsoli/CFG ani importu do gry.** Planowany config
-ma działać z [Yprac Hub by Yesber, Workshop `3070715607`](https://steamcommunity.com/sharedfiles/filedetails/?id=3070715607),
-z preferencją kopiowania komend do konsoli. Istniejący kod nie integruje się
-jeszcze z Yprac. Automatyczne ustawienie pozycji, kierunku patrzenia i broni
-obu stron oraz zgodność właściwej mapy Mirage wymagają potwierdzenia w grze.
+**Jest prototyp eksportu do konsoli/CFG i paczek ZIP, nie ma potwierdzonego
+importu do gry.** Cel to
+[Yprac Hub by Yesber, Workshop `3070715607`](https://steamcommunity.com/sharedfiles/filedetails/?id=3070715607),
+Mirage/Sandbox. Eksporter zakłada osobno indeks gracza bota `2` i indeks jego
+encji/pawn `2` po usunięciu botów. Nie wyszukuje indeksów dynamicznie.
+Pozycje, kierunek oczu, broń, kolejność wykonania i zgodność mapy nadal wymagają
+potwierdzenia w grze. Wyniki mają status `unverified_in_game`.
 Nie planujemy własnego serwera/pluginu.
+
+Istnieje też **minimalny backend Django/PostgreSQL/Django-Q2**, bez treningowego
+UI: konta e-mail, powiązanie Steam, prywatny upload R2, jednorazowa analiza
+i prywatna historia. Integracje z rzeczywistym R2, Steam i SMTP wymagają
+konfiguracji i osobnej próby przed wdrożeniem; testy z atrapami nie są jej dowodem.
 
 ## Uruchomienie
 
@@ -106,6 +113,76 @@ przegranych kandydatów, nawet gdy raport zawiera wygrane. Raport nie rekonstruu
 ruchu, pancerza, zdrowia, zachowania bota ani zasłonięcia przez smoke.
 Rewizja `unverified-demo-build-*` oznacza **niepotwierdzoną zgodność mapy**.
 
+### Eksport Yprac i paczki treningowe — prototyp
+
+Oba polecenia przyjmują raport analizy v2 albo dokument scenariuszy v1.
+Identyfikatory są w `scenario_document.scenarios[].scenario_id` raportu
+lub `scenarios[].scenario_id` dokumentu. Przykładowe ID zastąp rzeczywistymi:
+
+```sh
+# Jedna linia do konsoli na stdout; ostrzeżenia na stderr.
+uv run cs-map-trainer export-scenario results/report.json \
+  --scenario-id ID_SCENARIUSZA
+
+# Opcjonalny CFG tej samej sytuacji, bez zmieniania bindów i autoexec.cfg.
+uv run cs-map-trainer export-scenario results/report.json \
+  --scenario-id ID_SCENARIUSZA --cfg --output results/scenario.cfg
+
+# Domyślnie wszystkie dostępne scenariusze, bez CFG.
+uv run cs-map-trainer build-pack results/report.json --output results/training.zip
+
+# Jawny wybór i odrzucenie; opcje można powtarzać.
+uv run cs-map-trainer build-pack results/report.json \
+  --include ID_PIERWSZY --include ID_DRUGI --reject ID_ODRZUCONY \
+  --include-cfg --output results/selected-training.zip
+```
+
+Wybór zachowuje kolejność dokumentu. ID nieznane, powtórzone, jednocześnie
+wybrane i odrzucone oraz pusty wynik kończą się błędem. Bez `--include`
+uwzględniamy wszystkie nieodrzucone sytuacje. Raport bez kandydatów nie tworzy
+paczki; nieobsługiwana wybrana sytuacja powoduje błąd całego eksportu,
+zamiast zostać po cichu pominięta. Można ją jawnie odrzucić.
+
+ZIP zawiera `manifest.json`, wybrane `scenarios.json`, `README.txt`,
+`console/scenario-NNNN.txt` i opcjonalnie `cfg/scenario-NNNN.cfg`.
+Każdy TXT ma **jedną linię jednego scenariusza** do wklejenia po wejściu
+do właściwego Mirage/Sandbox z klientem Yprac. Powtórzenie polega na ponownym
+wklejeniu tej samej linii, nie na niepotwierdzonym zachowaniu `restart`.
+Pliki są numerowane niezależnie od ID; manifest mapuje je na źródłowe sytuacje
+i zapisuje wybór, odrzucenia, źródła, ograniczenia i wersję eksportera
+`yprac-sandbox-prototype-v1`. Nie dołączamy dema ani assetów.
+Opcjonalny CFG można skopiować bez nadpisywania plików do własnego katalogu
+`game/csgo/cfg/cmt_v1` i uruchomić np. `exec cmt_v1/scenario-0001.cfg`.
+Nie jest to wymagane przy kopiowaniu TXT do konsoli.
+Paczki zawierają metadane uczestników — traktuj je jako prywatne.
+Nowe artefakty są publikowane w całości bez nadpisywania istniejących ścieżek;
+rodzic katalogu wyjściowego musi już istnieć.
+
+Sekwencja usuwa boty, dodaje jednego właściwej strony i używa
+`setpos_player 2`. Osobne, zaakceptowane założenie indeksu **encji** `2`
+pozwala nadać jej `targetname` przez `ent_setname cmt_v1_bot 2`.
+Pomocniczy `point_teleport` próbuje odtworzyć pozycję i orientację bota.
+**Indeks gracza nie jest gwarancją indeksu encji**, a obrót modelu nie
+potwierdza kierunku oczu. Obsługa broni korzysta z komend chatu Yprac.
+Gotowość bota, tworzenie encji, kolejność entity I/O i chatu oraz faktycznie
+aktywna broń są niezweryfikowane. Nie dodajemy `wait` ani zgadywanych opóźnień;
+średniki same nie zapewniają synchronizacji.
+
+Używaj wyłącznie w **odizolowanej lokalnej sesji treningowej** z jednym
+człowiekiem. Komendy włączają `sv_cheats`, wyłączają limit/równoważenie drużyn,
+zmieniają quota/stop botów, drużynę, pozycję, kąty i broń gracza oraz nazwę
+encji `2`. Nie zapisują poprzednich wartości; manifest zawiera pełną listę
+zmian. Po treningu opuść sesję i sprawdź ustawienia przed dalszą grą.
+Nie używaj na matchmakingu ani współdzielonym serwerze.
+
+Walidacja eksportera dopuszcza tylko `de_mirage`, jawną listę broni palnych,
+skończone XYZ w zakresie ±16384 i roll `0`. Zachowuje pitch/yaw i oznaczenia
+przybliżenia przeciwnika. Budżet pojedynczej linii to 1023 bajty ASCII;
+to limit prototypu, nie potwierdzona pojemność konsoli w danym buildzie.
+Przekroczenie limitów daje błąd, nie zaokrąglenie lub obcięcie komend.
+Syntetyczny `tests/fixtures/synthetic-scenarios.json` jest celowo odrzucany.
+Poprawne wygenerowanie paczki **nie zalicza G1**.
+
 ### Benchmark
 
 ```sh
@@ -196,9 +273,15 @@ Identyfikator rewizji mapy nie jest sam w sobie dowodem zgodności geometrii.
 Próbka `tests/fixtures/synthetic-scenarios.json` jest całkowicie syntetyczna:
 nie opisuje prawdziwej mapy, graczy ani dema i nie nadaje się do treningu.
 Puste `limitations` oznacza wyłącznie pustą listę zgłoszeń, nie dowód braku efektów.
-Zakres parametrów konkretnej integracji sprawdzi dopiero potwierdzony eksporter.
+Eksporter ma własne ograniczenia opisane powyżej; nie są dowodem zgodności gry.
 
 ## Rozwój
+
+Testy backendu wymagają PostgreSQL 16 z użytkownikiem mającym prawo tworzenia
+bazy testowej; testy CLI/jednostkowe nie potrzebują działającej bazy.
+Ustaw `PGHOST`, `PGPORT`, `PGDATABASE`, `PGUSER`, `PGPASSWORD`.
+`pytest` używa osobnej konfiguracji `tests/web_settings.py`, atrap R2/Steam
+i skrzynki e-mail w pamięci, bez sekretów wdrożeniowych.
 
 ```sh
 uv run ruff check .
@@ -225,6 +308,132 @@ Druga próbka to `faceit-de_mirage-6de46e85`, zawierająca dogrywkę, SHA-256
 Nie dołączamy dema ani danych zawodników do repozytorium lub obrazu.
 To próby integracyjne dwóch źródeł, nie pełny benchmark na docelowym VPS,
 ręczne oznaczenie każdego kontaktu ani ocena trenera.
+
+## Minimalny backend
+
+Stos: Django 5.2, PostgreSQL, Django-Q2 z brokerem ORM i jeden worker.
+Nie ma osobnego frontendu/API ani treningowego UI; ścieżki `/backend/` są
+prywatnymi operacjami monolitu z sesją Django i CSRF. Obraz CLI pozostaje osobny.
+
+**Polityka:** publiczna rejestracja e-mail/hasło i potwierdzenie adresu;
+przed uploadem obowiązkowe Steam OpenID. Jeden SteamID64 jest przypisany do
+jednego konta aplikacji, bez samodzielnego odpinania. Analiza dotyczy tylko tego
+gracza; jego obecność w demie jest sprawdzana. Limit to **3 przyjęte dema na
+SteamID w ruchomych 7 dniach**, z rezerwacją przy rozpoczęciu uploadu i jednym
+aktywnym zadaniem. 1 GiB jest wyłącznie technicznym limitem pojedynczego pliku.
+Zły/nieobsługiwany plik zużywa przyjęcie, błąd infrastruktury zwalnia kwotę.
+Niedokończona rezerwacja wygasa bez naliczenia.
+
+Demo trafia z przeglądarki do prywatnego R2 Standard, nie przez web. Backend
+tworzy multipart upload z jedną częścią, podpisuje dokładny `Content-Length`,
+a następnie sam listuje część i kończy upload. Przeglądarka wysyła surowy `File`
+lub `Blob` przez `PUT`, nie formularz `multipart/form-data`; długość nagłówka
+ustawia przeglądarka z rozmiaru ciała. Zakończenie/abort unieważnia identyfikator
+uploadu, więc stary URL nie może później podmienić wejścia workera.
+
+Worker potrzebuje tymczasowej lokalnej kopii dla Awpy. **Po pierwszej próbie,
+także nieudanej, usuwa ją oraz wejście w R2. Nie ma automatycznego retry analizy.**
+Nowa próba wymaga nowego uploadu; duplikat komunikatu kolejki nie parsuje drugi
+raz. Metadane, raport, scenariusze i wygenerowane komendy zostają w prywatnej
+historii aż do usunięcia przez użytkownika/konta. Brak kandydatów i brak możliwości
+eksportu konkretnej sytuacji są jawnie rozróżniane.
+
+Sprzątanie działa także niezależnie od workera: porzucone uploady/zadania wygasają
+po 24 h, utracony worker po 900 s, nieudane usuwanie jest oznaczane i ponawiane.
+Nowy upload jest blokowany do usunięcia poprzedniego wejścia, aby awaria
+sprzątania nie pozwalała gromadzić kolejnych dem mimo zwalniania kwoty.
+Lifecycle R2 stanowi dodatkowe zabezpieczenie; nie gwarantuje usunięcia w dokładnej
+sekundzie. Po usunięciu konta minimalna ewidencja SteamID i kwoty pozostaje do końca
+7-dniowego okna, aby nowa rejestracja nie resetowała limitu. Odzyskanie powiązania
+przez administratora nie może kasować tej ewidencji. Operacje usunięcia konta
+wymagają hasła i zakończenia aktywnego zadania. Usunięcia należy uwzględnić
+także w przyszłej procedurze odtwarzania backupu.
+
+### Konfiguracja i uruchomienie
+
+Skopiuj `.env.example` do `.env`, ustaw własne `DJANGO_SECRET_KEY` i `PGPASSWORD`
+oraz dane prywatnego R2, SMTP i Steam Web API. Klucz Steam jest potrzebny
+providerowi allauth do pobrania profilu po weryfikacji OpenID; w bazie z tego
+profilu zachowywany jest jedynie SteamID. Sekretów nie dodawaj do Git.
+Callback ogranicza dane przed lookup/zapisem allauth, również przy ponownym
+lub odrzuconym połączeniu Steam. Migracja `0002_minimize_steam_profiles`
+usuwa nadmiarowe pola ze starszych zapisanych profili; wdrożenie wymaga
+uruchomienia `cs-map-trainer-web migrate`.
+`DJANGO_DEBUG=1` jest wyłącznie do lokalnego HTTP; produkcja wymaga HTTPS,
+`DJANGO_DEBUG=0`, poprawnych hostów i originów.
+
+```sh
+docker compose build
+docker compose up -d db
+docker compose run --rm web cs-map-trainer-web migrate --noinput
+docker compose run --rm web cs-map-trainer-web createsuperuser
+# UWAGA: polecenie zastępuje CORS/lifecycle wskazanego bucketa.
+# Użyj dedykowanego, prywatnego bucketa wyłącznie na wejściowe dema.
+docker compose run --rm web cs-map-trainer-web configure_r2 \
+  --origin http://localhost:8000
+docker compose up -d web worker maintenance
+```
+
+W R2 wyłącz publiczny dostęp i publiczną domenę. Token wykonawczy ogranicz do
+dedykowanego bucketa; konfiguracja CORS/lifecycle może wymagać osobnego tokena
+administracyjnego, którego nie pozostawiaj workerowi. Nie korzystamy z S3 POST
+policies ani wersjonowania R2. Historia jest w PostgreSQL, nie w buckecie wejść.
+
+Compose ma prywatną bazę, web dostępny na loopback `:8000`, osobny worker
+bez roota i wspólny roboczy wolumen dla workera/reapera, bez backupu dem.
+Domyślne budżety to 300 s analizy, 4 GiB limitu parsera, kontener workera 5 GiB
+i 2 CPU. Nadzorca egzekwuje RSS/czas i zabija proces przy przekroczeniu;
+Linux dodatkowo ogranicza przestrzeń adresową, CPU i rozmiar wyniku.
+Parser dziedziczy blokadę `.parser.lock` we wspólnym wolumenie roboczym:
+śmierć workera nie zwalnia slotu, dopóki sam parser nie zakończy działania.
+Nie usuwać pliku blokady podczas pracy. Linux kończy parser sygnałem
+`SIGKILL` po śmierci rodzica, także podczas wykonania kodu natywnego;
+pozostałe systemy POSIX używają watchdogu. Odziedziczona blokada pozostaje
+ochroną wyłączności niezależnie od szybkości reakcji watchdogu i blokady PostgreSQL.
+To ochronne ustawienia startowe, **nie potwierdzony sizing VPS**. Potrzebny jest
+także zapas RAM dla weba/bazy i miejsce na jedno demo oraz osierocone wejścia.
+Compose nie jest jeszcze kompletnym wdrożeniem TLS/backup/monitoring.
+
+Bez Dockera: wyeksportuj zmienne środowiska (Django nie wczytuje automatycznie
+`.env`), uruchom `uv run cs-map-trainer-web migrate`, a następnie w osobnych
+procesach `runserver`, `qcluster` oraz `maintain_uploads --loop`.
+R2, SMTP i PostgreSQL są nadal wymagane. Worker wymaga systemu POSIX;
+produkcyjna izolacja i twardy limit kontenera dotyczą wariantu Linux/Docker.
+
+### Operacje do podłączenia UI
+
+| Operacja | Ścieżka / dane |
+|---|---|
+| Rejestracja/logowanie/weryfikacja | `/accounts/signup/`, `/accounts/login/`, odnośnik z e-maila |
+| Powiązanie Steam | `POST /accounts/steam/login/`, formularz `process=connect`, CSRF |
+| Historia i cookie CSRF | `GET /backend/history/` |
+| Rezerwacja/upload | `POST /backend/uploads/`, JSON: UUID `request_id`, `size_bytes`, `has_upload_rights: true`; odpowiedź zawiera podpisany URL `PUT` |
+| Ukończenie i kolejka | `POST /backend/uploads/<id>/complete/` |
+| Status/wynik/komendy | `GET /backend/uploads/<id>/` |
+| Usunięcie historii | `DELETE /backend/uploads/<id>/` po zakończeniu zadania |
+| Usunięcie konta | `POST /backend/account/delete/`, JSON `password` |
+
+W żądaniach modyfikujących dane wysyłaj cookie sesji i `X-CSRFToken`.
+`request_id` jest kluczem idempotencji dla jednego SteamID; ponowienie z innym
+rozmiarem jest błędem. SteamID przesłany przez klienta nie wybiera gracza.
+Upload do R2 nie wymaga cookie sesji, tylko podpisanego URL. Błędy mają jawne
+kody, m.in. `weekly_demo_limit`, `unsupported_or_invalid_demo`, `worker_lost`,
+`linked_player_not_in_demo`, `processing_failed`; stan sprzątania jest
+oddzielony od wyniku analizy.
+
+Przed wdrożeniem wykonaj próbę rzeczywistej rejestracji, SMTP i Steam oraz
+opty-in test kontraktu R2 na prywatnym buckecie. Test tworzy wyłącznie własny
+syntetyczny payload i usuwa jego obiekt; nie wysyła dem z repozytorium:
+
+```sh
+CS_MAP_TRAINER_R2_CONTRACT=1 uv run pytest tests/integration/test_r2_contract.py
+```
+
+Próba sprawdza odrzucenie innego rozmiaru, poprawny upload, zakończenie, odczyt,
+unieważnienie URL i usunięcie. Bez tych prób nie oznaczamy integracji jako
+potwierdzonej. Selekcja i autoryzowane paczki WWW pozostają kolejnym etapem;
+pakiet trenera/akademii z analizą innych zawodników wymaga osobnego uprawnienia
+i polityki kwot, nie jest teraz dostępnym obejściem SteamID.
 
 ## Kolejne bramki
 

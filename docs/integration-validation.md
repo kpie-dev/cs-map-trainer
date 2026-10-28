@@ -10,14 +10,79 @@ integracji wyłącznie ze zwykłą lokalną sesją CS2.
 
 Wymagane jest samodzielne rozpoznanie bota, ustawienie XYZ i kierunku patrzenia
 obu uczestników oraz ponowienie. Użytkownik nie ma podawać indeksu bota.
-Do potwierdzenia tej ścieżki kod dostarcza wyłącznie parser i analizę do JSON,
-nie eksporter ani obsługę Yprac.
+Kod dostarcza parser, analizę i prototyp eksportera/paczek Yprac; wygenerowanie
+komend nie potwierdza tej ścieżki ani działania importu.
 
 **Aktualna kolejność:** backend → UI → próby w grze na końcu. Poprawność
 komend i mechanizmu importu jest zaakceptowanym założeniem implementacyjnym,
 nie uzyskanym dowodem runtime. G1 nie blokuje eksportera ani aplikacji;
 niniejszy protokół służy końcowemu odbiorowi po ich zbudowaniu. Testy kodu,
 uprawnień i przepływu aplikacji pozostają wymagane podczas implementacji.
+
+## Osobny odbiór minimalnego backendu
+
+Zaimplementowano fundament Django/PostgreSQL/Django-Q2, publiczną rejestrację
+z potwierdzeniem e-mail, połączenie Steam OpenID i prywatny intake R2.
+Nie jest to dowód działającej konfiguracji usług: przed udostępnieniem
+sprawdzić prawdziwe SMTP, powiązanie Steam oraz kontrakt R2 opisany w README.
+Testy backendu korzystają z PostgreSQL i atrap usług; opt-in próba R2
+sprawdza podpisany rozmiar, ukończenie, unieważnienie URL i usunięcie.
+Nie wykonywano tutaj próby z rzeczywistymi poświadczeniami ani uruchomienia Compose.
+
+Analiza dotyczy tylko SteamID potwierdzonego przez właściciela konta, z limitem
+3 przyjętych dem w ruchomych 7 dniach. Techniczny limit pliku to 1 GiB.
+Po pierwszej próbie usuwane są obie kopie dema, również po błędzie; brak
+automatycznego retry analizy. Sprawdzić usuwanie po awarii/timeout i ponawianie
+nieudanego sprzątania niezależnie od workera. Porzucone wejścia wygasają po 24 h.
+Regresje obejmują `SIGKILL` workera, dziedziczenie blokady przez nadal żywy
+proces i odzyskanie slotu dopiero po jego zakończeniu. Wdrożenie wymaga
+wspólnego wolumenu roboczego i zastosowania migracji minimalizującej starsze
+profile Steam; callback ogranicza dane przed zapisem allauth, także przy reconnect.
+W historii pozostają prywatne raporty, scenariusze i komendy do usunięcia przez
+użytkownika/konto. Potwierdzić kontrolę właściciela, brak resetu kwoty przez
+nowe konto aplikacji i zachowanie historii bez wejściowego dema.
+
+Selekcja/paczki WWW oraz UI pozostają poza tą iteracją; G2/G3 nie są zamknięte.
+Eksport nadal ma `unverified_in_game`, a G1 pozostaje otwarte.
+
+## Zaimplementowany prototyp do końcowej próby
+
+CLI `export-scenario` i `build-pack` używa wersji
+`yprac-sandbox-prototype-v1`. Paczka zapisuje `unverified_in_game`, źródła
+i ograniczenia każdej sytuacji oraz osobną listę założeń i zmian sesji.
+Instrukcje użycia są w `../README.md`. Prototyp nie jest wynikiem G1.
+
+Po usunięciu botów i dodaniu jednego przyjmujemy indeks **gracza** `2`
+dla `setpos_player`. Użytkownik osobno zaakceptował jako hipotezę indeks
+**encji/pawn** `2`, użyty przez `ent_setname cmt_v1_bot 2`.
+Nie utożsamiamy indeksów jako faktu; nie ma dynamicznego odczytu encji.
+Nazwa wyświetlana bota nie służy jako jego `targetname`.
+Eksporter tworzy własny `point_teleport` z referencyjnym XYZ i kątami,
+wywołuje `TeleportEntityToCurrentPos cmt_v1_bot` i kolejkuje `Kill`
+wyłącznie własnej encji pomocniczej. Przed kolejnym utworzeniem usuwa
+pozostałą encję o tej samej nazwie. Nie usuwa wszystkich `point_teleport`
+z mapy. Przywraca XYZ/kąty gracza i wysyła `weapon`/`botweapon` przez `say`.
+
+Dump CS2 `DumpSource2/entities/server.fgd` potwierdza `point_teleport`,
+`teleport_use_current_angle` i wejście `TeleportEntityToCurrentPos`;
+`commands.txt` potwierdza komendy tworzenia/nazywania encji.
+To nie dowodzi kierunku oczu, składni całej sekwencji ani synchronizacji.
+Rewizja pliku FGD wskazana przy rozpoznaniu:
+`70b98b48a2114632e5bf79b07efebcde1a06256c`.
+Źródło: [publiczny dump](https://github.com/SteamDatabase/GameTracking-CS2/blob/70b98b48a2114632e5bf79b07efebcde1a06256c/DumpSource2/entities/server.fgd).
+
+Przed zaliczeniem próby sprawdzić osobno oba indeksy od czystej sesji,
+po zmianie drużyny, ponownym wykonaniu i restarcie, gotowość po `jointeam`
+i dodaniu bota, utworzenie i usunięcie własnej encji oraz kierunek oczu.
+Szczególnie sprawdzić kolejność entity I/O i asynchronicznego klienta Yprac:
+średniki nie potwierdzają zakończenia poprzedniej operacji. Nie dodano
+`wait`, zgadywanych opóźnień ani `bot_mimic`.
+
+Prototyp zmienia globalne ustawienia i wyrzuca istniejące boty; jest tylko
+do izolowanej lokalnej sesji jednego człowieka. Nie przywraca poprzednich
+wartości ustawień. Pełny wykaz jest w manifeście. Powtórka polega na ponownym
+wklejeniu ustawienia; trwałość `savepos`/`loadpos` i semantyka `restart`
+nie są wykorzystywane jako potwierdzony mechanizm odtworzenia.
 
 ## Fakty i otwarte pytania o Yprac
 
@@ -271,8 +336,9 @@ konkretnie w Yprac Sandbox, od świeżej sesji, po ponownym wykonaniu,
 restarcie rundy oraz przeładowaniu mapy. Tester może odczytywać indeks
 diagnostycznie; docelowy użytkownik nie ma robić tego ręcznie.
 
-Najbliższym krokiem jest eksporter i backend na zaakceptowanych założeniach,
-następnie UI; próba jednej referencji należy do końcowego odbioru.
+Eksporter i paczki są już prototypem na zaakceptowanych założeniach.
+Najbliższym krokiem jest backend, następnie UI; próba jednej referencji
+należy do końcowego odbioru.
 `bot_kick` i zmiany globalnych ustawień botów ograniczyć do
 zadeklarowanej, odizolowanej sesji treningowej. Jedno wklejenie musi zapewnić
 gotowość bota przed `setpos_player`, pozycje, kierunki oczu i broń obu stron.
@@ -302,7 +368,8 @@ dowodzą ani możliwości, ani niemożliwości importu przez Yprac:
   `SetAbsAngles` zmieniające orientację modelu nie wystarcza.
 
 Źródło: [publiczne dumpy CS2](https://github.com/SteamDatabase/GameTracking-CS2/tree/master/DumpSource2),
-pliki `commands.txt`, `convars.txt`, `entities/server.fgd`. Nie włączono generatora
-tych komend dotychczas. Aktualna decyzja dopuszcza implementację na
+pliki `commands.txt`, `convars.txt`, `entities/server.fgd`. Generator prototypowy
+korzysta już z części tych komend, zgodnie z opisem na początku dokumentu.
+Aktualna decyzja dopuszcza implementację na
 założeniach i odkłada dowód runtime na koniec; zmiana celu na vanilla CS2
 nadal wymaga osobnej decyzji.

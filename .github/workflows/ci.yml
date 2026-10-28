@@ -10,6 +10,24 @@ permissions:
 jobs:
   python:
     runs-on: ubuntu-latest
+    services:
+      postgres:
+        image: postgres:16
+        env:
+          POSTGRES_DB: trainer
+          POSTGRES_USER: trainer
+          POSTGRES_PASSWORD: ci-only-password
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U trainer -d trainer"
+          --health-interval 5s --health-timeout 5s --health-retries 10
+    env:
+      DJANGO_SECRET_KEY: ci-only-not-for-deployment
+      PGDATABASE: trainer
+      PGUSER: trainer
+      PGPASSWORD: ci-only-password
+      PGHOST: 127.0.0.1
     steps:
       - uses: actions/checkout@v4
       - uses: astral-sh/setup-uv@v7
@@ -19,4 +37,7 @@ jobs:
       - run: uv run --locked ruff check .
       - run: uv run --locked ruff format --check .
       - run: uv run --locked pytest
+      - run: uv run --locked cs-map-trainer-web check
+      - run: uv run --locked cs-map-trainer-web migrate --noinput
+      - run: uv run --locked cs-map-trainer-web makemigrations --check --dry-run
       - run: uv build

@@ -109,6 +109,22 @@ def run(reader, **kwargs):
     return analyze(lambda: reader, str(PLAYER), **kwargs)
 
 
+def test_analysis_report_can_be_exported_without_reparsing(reader):
+    from cs_map_trainer.packs import build_pack, load_scenarios
+
+    report = run(reader)
+    assert report.scenario_document is not None
+    requested_ticks = list(reader.requested_ticks)
+    document = load_scenarios(report.model_dump_json().encode())
+    pack = build_pack(document, include_cfg=True)
+    assert pack.manifest.selected_scenario_ids == [
+        scenario.scenario_id for scenario in report.scenario_document.scenarios
+    ]
+    assert pack.manifest.entries[0].source.rules_version == "damage-window-v3"
+    assert pack.manifest.compatibility == "unverified_in_game"
+    assert reader.requested_ticks == requested_ticks
+
+
 def test_shared_snapshot_precedes_first_damage_and_preserves_aim(reader):
     result = run(reader)
     assert result.status == "candidates_ready"
