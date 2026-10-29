@@ -42,8 +42,19 @@ W historii pozostają prywatne raporty, scenariusze i komendy do usunięcia prze
 użytkownika/konto. Potwierdzić kontrolę właściciela, brak resetu kwoty przez
 nowe konto aplikacji i zachowanie historii bez wejściowego dema.
 
-Selekcja/paczki WWW oraz UI pozostają poza tą iteracją; G2/G3 nie są zamknięte.
-Eksport nadal ma `unverified_in_game`, a G1 pozostaje otwarte.
+Backend rozszerzono o zapis wyboru i odrzuceń przy raporcie, prywatny eksport
+pojedynczej linii komend/CFG i opcjonalny ZIP generowany na żądanie.
+Operacje działają po usunięciu wejścia, bez ponownego parsowania i dostępu do R2.
+Wybór jest czyszczony wraz z historią/kontem. Testy obejmują kontrolę właściciela,
+CSRF, cudze/usunięte wyniki, nieprawidłowy wybór i nieobsługiwany eksport.
+Lokalnie zaliczono 127 testów backendu na PostgreSQL 16 w osobnym kontenerze;
+pełna regresja: 421 zaliczonych, 2 pominięte (lokalne demo i prawdziwe R2).
+Lint/format, build, Django checks, zastosowanie migracji
+`0003_training_selection` i zgodność modeli z migracjami przeszły.
+To próba bazy PostgreSQL w Dockerze, nie odbiór obrazu workera Linux/Compose.
+Treningowe UI nie jest zaimplementowane. Kod backendu treningowego jest gotowy;
+G2 nadal wymaga odbioru usług zewnętrznych, G3 i G1 pozostają otwarte.
+Eksport nadal ma `unverified_in_game`.
 
 ## Zaimplementowany prototyp do końcowej próby
 

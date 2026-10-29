@@ -1,3 +1,4 @@
+import json
 import logging
 import uuid
 from datetime import timedelta
@@ -8,6 +9,12 @@ from django.db import transaction
 from django.db.models.functions import Coalesce
 from django.utils import timezone
 from django_q.tasks import async_task
+from pydantic import ValidationError
+
+from cs_map_trainer.analysis import AnalysisReport
+from cs_map_trainer.exporting import ExportError, export_scenario
+from cs_map_trainer.packs import build_pack, load_scenarios, select_scenarios
+from cs_map_trainer.scenarios import ContractModel, Identifier
 
 from .models import SteamIdentity, Upload
 from .storage import R2, InvalidUpload
@@ -118,7 +125,8 @@ def delete_history(user, upload_id):
         upload.state = Upload.State.DELETED
         upload.report = None
         upload.scripts = None
-        upload.save(update_fields=["state", "report", "scripts"])
+        upload.selection = None
+        upload.save(update_fields=["state", "report", "scripts", "selection"])
 
 
 def delete_account(user):
@@ -130,3 +138,104 @@ def delete_account(user):
 
 
 STORAGE_ERRORS = (BotoCoreError, ClientError, OSError, TimeoutError)
+
+
+class TrainingSelection(ContractModel):
+    include: list[Identifier] | None
+    reject: list[Identifier]
+
+
+def training_result(user, upload_id, *, lock=False):
+    uploads = Upload.objects.exclude(state=Upload.State.DELETED)
+    if lock:
+        uploads = uploads.select_for_update()
+    upload = uploads.get(pk=upload_id, owner=user)
+    if upload.state != Upload.State.READY:
+        raise IntakeError("result_not_ready")
+    try:
+        raw = json.dumps(upload.report)
+        report = AnalysisReport.model_validate_json(raw)
+    except (ValueError, TypeError) as error:
+        logger.error("Invalid saved training report for upload %s", upload.pk)
+        raise IntakeError("invalid_saved_report", 500) from error
+    if report.player_steam_id != upload.identity_id:
+        logger.error("Saved report player mismatch for upload %s", upload.pk)
+        raise IntakeError("invalid_saved_report", 500)
+    if report.status == "no_eligible_duels" and report.scenario_document is None:
+        raise IntakeError("no_training_candidates")
+    try:
+        document = load_scenarios(raw.encode("utf-8"))
+    except (ValidationError, ExportError) as error:
+        logger.error("Invalid saved training candidates for upload %s", upload.pk)
+        raise IntakeError("invalid_saved_report", 500) from error
+    return upload, document
+
+
+def saved_selection(upload, document):
+    try:
+        selection = (
+            TrainingSelection(include=None, reject=[])
+            if upload.selection is None
+            else TrainingSelection.model_validate(upload.selection)
+        )
+        selected = select_scenarios(document, include=selection.include, reject=selection.reject)
+    except (ValidationError, ExportError) as error:
+        logger.error("Invalid saved training selection for upload %s", upload.pk)
+        raise IntakeError("invalid_saved_selection", 500) from error
+    return selection, selected
+
+
+def selection_result(document, selection, selected):
+    return {
+        **selection.model_dump(),
+        "available_scenario_ids": [item.scenario_id for item in document.scenarios],
+        "selected_scenario_ids": [item.scenario_id for item in selected.scenarios],
+        "compatibility": "unverified_in_game",
+    }
+
+
+def get_training_selection(user, upload_id):
+    upload, document = training_result(user, upload_id)
+    selection, selected = saved_selection(upload, document)
+    return selection_result(document, selection, selected)
+
+
+@transaction.atomic
+def save_training_selection(user, upload_id, data):
+    upload, document = training_result(user, upload_id, lock=True)
+    try:
+        selection = TrainingSelection.model_validate(data)
+    except ValidationError as error:
+        raise IntakeError("invalid_selection_payload", 400) from error
+    try:
+        selected = select_scenarios(document, include=selection.include, reject=selection.reject)
+    except ExportError as error:
+        raise IntakeError("invalid_scenario_selection", 400) from error
+    upload.selection = selection.model_dump()
+    upload.save(update_fields=["selection"])
+    return selection_result(document, selection, selected)
+
+
+def training_pack(user, upload_id, *, include_cfg=False):
+    upload, document = training_result(user, upload_id)
+    selection, _ = saved_selection(upload, document)
+    try:
+        return build_pack(
+            document,
+            include=selection.include,
+            reject=selection.reject,
+            include_cfg=include_cfg,
+        )
+    except ExportError as error:
+        raise IntakeError("scenario_not_exportable", 422) from error
+
+
+def training_export(user, upload_id, scenario_id):
+    _, document = training_result(user, upload_id)
+    scenario = next((item for item in document.scenarios if item.scenario_id == scenario_id), None)
+    if scenario is None:
+        raise IntakeError("scenario_not_found", 404)
+    try:
+        return scenario, export_scenario(scenario)
+    except ExportError as error:
+        raise IntakeError("scenario_not_exportable", 422) from error

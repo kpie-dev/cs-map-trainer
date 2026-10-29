@@ -31,34 +31,6 @@ pytestmark = pytest.mark.django_db
 STEAM = "76561198000000001"
 
 
-@pytest.fixture
-def user():
-    user = get_user_model().objects.create_user("player", "player@example.test", "some-password")
-    EmailAddress.objects.create(user=user, email=user.email, verified=True, primary=True)
-    SteamIdentity.objects.create(steam_id=STEAM, owner=user)
-    return user
-
-
-@pytest.fixture
-def storage():
-    storage = Mock(spec=R2)
-    storage.begin.return_value = "multipart-id"
-    storage.sign.return_value = "https://example.test/signed-upload"
-    storage.orphans.return_value = []
-    return storage
-
-
-@pytest.fixture
-def upload(user, storage):
-    return services.initiate(user, uuid.uuid4(), 32, storage)
-
-
-@pytest.fixture
-def api(client, user):
-    client.force_login(user)
-    return client
-
-
 def test_initiation_idempotent_and_conflicting_size(user, storage):
     request_id = uuid.uuid4()
     upload = services.initiate(user, request_id, 32, storage)
@@ -687,6 +659,21 @@ def test_upload_to_persistent_private_commands_flow(
     assert result["cleanup_pending"] is False
     assert {path.name for path in tmp_path.iterdir()} == {".parser.lock"}
     storage.delete.assert_called_once()
+    scenario_id = result["report"]["scenario_document"]["scenarios"][0]["scenario_id"]
+    with (
+        patch.object(tasks, "run_parser", side_effect=AssertionError("Must not parse again")),
+        patch.object(services, "R2", side_effect=AssertionError("Must not use storage")),
+    ):
+        response = api.post(
+            f"/backend/uploads/{upload_id}/selection/",
+            {"include": [scenario_id], "reject": []},
+            content_type="application/json",
+        )
+        assert response.status_code == 200
+        assert response.json()["selected_scenario_ids"] == [scenario_id]
+        assert api.get(f"/backend/uploads/{upload_id}/pack/").status_code == 200
+        exported = api.get(f"/backend/uploads/{upload_id}/scenarios/{scenario_id}/export/").json()
+        assert exported["console_line"] == result["scripts"][0]["console_line"]
 
 
 def test_new_upload_waits_until_previous_input_was_deleted(user, upload, storage):

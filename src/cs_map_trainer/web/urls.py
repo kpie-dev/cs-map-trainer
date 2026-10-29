@@ -13,5 +13,11 @@ urlpatterns = [
     path("backend/uploads/", views.upload_start),
     path("backend/uploads/<uuid:upload_id>/complete/", views.upload_complete),
     path("backend/uploads/<uuid:upload_id>/", views.upload_detail),
+    path("backend/uploads/<uuid:upload_id>/selection/", views.upload_selection),
+    path("backend/uploads/<uuid:upload_id>/pack/", views.upload_pack),
+    path(
+        "backend/uploads/<uuid:upload_id>/scenarios/<str:scenario_id>/export/",
+        views.upload_export,
+    ),
     path("backend/account/delete/", views.account_delete),
 ]

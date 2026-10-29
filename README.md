@@ -17,7 +17,8 @@ Nie planujemy własnego serwera/pluginu.
 
 Istnieje też **minimalny backend Django/PostgreSQL/Django-Q2**, bez treningowego
 UI: konta e-mail, powiązanie Steam, prywatny upload R2, jednorazowa analiza
-i prywatna historia. Integracje z rzeczywistym R2, Steam i SMTP wymagają
+i prywatna historia z zapamiętywaniem wyboru sytuacji, eksportem pojedynczej
+linii komend i opcjonalnymi paczkami ZIP. Integracje z rzeczywistym R2, Steam i SMTP wymagają
 konfiguracji i osobnej próby przed wdrożeniem; testy z atrapami nie są jej dowodem.
 
 ## Uruchomienie
@@ -358,7 +359,9 @@ profilu zachowywany jest jedynie SteamID. Sekretów nie dodawaj do Git.
 Callback ogranicza dane przed lookup/zapisem allauth, również przy ponownym
 lub odrzuconym połączeniu Steam. Migracja `0002_minimize_steam_profiles`
 usuwa nadmiarowe pola ze starszych zapisanych profili; wdrożenie wymaga
-uruchomienia `cs-map-trainer-web migrate`.
+uruchomienia `cs-map-trainer-web migrate`. Migracja `0003_training_selection`
+dodaje zapis wyboru przy wyniku; istniejące raporty domyślnie obejmują wszystkie
+sytuacje i nie są przepisywane.
 `DJANGO_DEBUG=1` jest wyłącznie do lokalnego HTTP; produkcja wymaga HTTPS,
 `DJANGO_DEBUG=0`, poprawnych hostów i originów.
 
@@ -410,6 +413,10 @@ produkcyjna izolacja i twardy limit kontenera dotyczą wariantu Linux/Docker.
 | Rezerwacja/upload | `POST /backend/uploads/`, JSON: UUID `request_id`, `size_bytes`, `has_upload_rights: true`; odpowiedź zawiera podpisany URL `PUT` |
 | Ukończenie i kolejka | `POST /backend/uploads/<id>/complete/` |
 | Status/wynik/komendy | `GET /backend/uploads/<id>/` |
+| Odczyt wyboru | `GET /backend/uploads/<id>/selection/` |
+| Zapis całego wyboru | `POST /backend/uploads/<id>/selection/`, JSON: `include` (lista ID lub `null`) i `reject` (lista ID) |
+| Komendy pojedynczej sytuacji | `GET /backend/uploads/<id>/scenarios/<scenario_id>/export/`, domyślnie JSON z `console_line` i metadanymi; opcjonalnie `?format=cfg` |
+| Opcjonalna paczka wybranych sytuacji | `GET /backend/uploads/<id>/pack/`, ZIP; opcjonalnie `?include_cfg=true` |
 | Usunięcie historii | `DELETE /backend/uploads/<id>/` po zakończeniu zadania |
 | Usunięcie konta | `POST /backend/account/delete/`, JSON `password` |
 
@@ -421,6 +428,66 @@ kody, m.in. `weekly_demo_limit`, `unsupported_or_invalid_demo`, `worker_lost`,
 `linked_player_not_in_demo`, `processing_failed`; stan sprzątania jest
 oddzielony od wyniku analizy.
 
+### Wybór sytuacji i eksport z zapisanego raportu
+
+Główna ścieżka treningu to pobranie `console_line` jednej sytuacji i jedno
+wklejenie do konsoli CS2/Yprac po wejściu do właściwej mapy i trybu.
+ZIP jest opcjonalnym pobraniem wielu sytuacji, nie wymaganiem uruchomienia
+treningu. Backend nie instaluje plików w katalogu gry.
+
+Wybór dotyczy kandydatów w `report.scenario_document.scenarios`, a nie nowych
+sytuacji przesyłanych przez klienta. Odczyt `/selection/` zwraca `include`,
+`reject`, `available_scenario_ids`, `selected_scenario_ids` i `compatibility`.
+Domyślnie `include: null` oraz `reject: []` uwzględniają wszystkie sytuacje.
+Przykładowe ciała POST (ID zastąp rzeczywistymi):
+
+```json
+{"include": ["ID_PIERWSZY"], "reject": ["ID_ODRZUCONY"]}
+```
+
+```json
+{"include": null, "reject": []}
+```
+
+Drugi przykład przywraca domyślny wybór wszystkich sytuacji. Każdy POST zastępuje
+cały wybór; oba pola są wymagane. Wybór jest zapamiętany przy raporcie,
+widoczny także jako `selection` w szczegółach wyniku i usuwany razem z historią
+lub kontem. `selection: null` w szczegółach oznacza brak zapisanego wyboru
+i zastosowanie wartości domyślnych; `/selection/` zwraca je jawnie.
+Kolejność eksportu wynika z raportu, nie z kolejności ID w żądaniu.
+
+Nieznane lub powtórzone ID, konflikt wyboru z odrzuceniem i pusty wynik dają
+`400 invalid_scenario_selection`. `include: []` nie oznacza „wszystkie”.
+Nieprawidłowe typy, brakujące lub nadmiarowe pola dają
+`400 invalid_selection_payload`; błąd nie zmienia poprzedniego wyboru.
+Zapis wyboru nie sprawdza jeszcze obsługi sytuacji przez eksporter.
+Nieobsługiwana wybrana sytuacja powoduje `422 scenario_not_exportable` dla
+całego ZIP, bez cichego pomijania. Można ją jawnie odrzucić.
+
+Pojedynczy eksport działa niezależnie od wyboru do ZIP. Domyślny JSON zawiera
+`console_line`, `scenario_id`, `exporter_version`, `compatibility`, `map`,
+`source`, `limitations`, `assumptions` i `session_changes`. `?format=json`
+jest jawnym wariantem domyślnym, a `?format=cfg` pobiera tekstowy plik CFG.
+Paczka używa zapisanego wyboru i istniejącego manifestu v1; bez parametru lub
+z `?include_cfg=false` nie zawiera CFG. Inne wartości, powtórzone parametry
+i nieznane parametry eksportu dają `400 invalid_export_parameters`.
+
+Operacje wymagają sesji właściciela i potwierdzonego e-maila; zapis wymaga CSRF.
+Cudze, usunięte i nieistniejące wyniki zwracają `404 not_found`, nieznany kandydat
+w dostępnym raporcie — `404 scenario_not_found`. Wynik inny niż `ready` daje
+`409 result_not_ready`, a raport bez kandydatów — `409 no_training_candidates`.
+Uszkodzone zapisane dane dają `500 invalid_saved_report` lub
+`500 invalid_saved_selection`, a nie pusty lub pozornie poprawny eksport.
+Nowy poprawny POST może zastąpić uszkodzony wybór.
+
+Raport i źródła są ponownie walidowane przed eksportem. Backend nie ufa komendom
+przesłanym przez klienta ani zapisanej liście `scripts`: wyprowadza je z raportu.
+Nie odczytuje dema, nie uruchamia parsera ani nie korzysta z R2 podczas tych
+operacji. ZIP jest generowany na żądanie, bez zapisywania dodatkowej kopii.
+Odpowiedzi są prywatne i mają `Cache-Control` zabraniający przechowywania.
+Każdy eksport nadal ma `unverified_in_game`; wygenerowanie go nie potwierdza
+działania w CS2/Yprac.
+
 Przed wdrożeniem wykonaj próbę rzeczywistej rejestracji, SMTP i Steam oraz
 opty-in test kontraktu R2 na prywatnym buckecie. Test tworzy wyłącznie własny
 syntetyczny payload i usuwa jego obiekt; nie wysyła dem z repozytorium:
@@ -431,8 +498,9 @@ CS_MAP_TRAINER_R2_CONTRACT=1 uv run pytest tests/integration/test_r2_contract.py
 
 Próba sprawdza odrzucenie innego rozmiaru, poprawny upload, zakończenie, odczyt,
 unieważnienie URL i usunięcie. Bez tych prób nie oznaczamy integracji jako
-potwierdzonej. Selekcja i autoryzowane paczki WWW pozostają kolejnym etapem;
-pakiet trenera/akademii z analizą innych zawodników wymaga osobnego uprawnienia
+potwierdzonej. Selekcja i autoryzowane eksporty backendu są zaimplementowane,
+ale treningowe UI pozostaje kolejnym etapem. Pakiet trenera/akademii
+z analizą innych zawodników wymaga osobnego uprawnienia
 i polityki kwot, nie jest teraz dostępnym obejściem SteamID.
 
 ## Kolejne bramki

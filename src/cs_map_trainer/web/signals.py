@@ -10,6 +10,7 @@ def erase_user_results(sender, instance, **kwargs):
     Upload.objects.filter(owner=instance).update(
         report=None,
         scripts=None,
+        selection=None,
         state=Upload.State.DELETED,
         cleanup_pending=True,
     )

@@ -46,6 +46,7 @@ class Upload(models.Model):
     error_code = models.CharField(max_length=64, blank=True)
     report = models.JSONField(null=True)
     scripts = models.JSONField(null=True)
+    selection = models.JSONField(null=True)
 
     class Meta:
         constraints = [

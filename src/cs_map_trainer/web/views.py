@@ -8,11 +8,13 @@ from allauth.socialaccount.providers.steam.views import SteamOpenIDCallbackView,
 from django.conf import settings
 from django.contrib.auth import logout
 from django.db import transaction
-from django.http import JsonResponse
+from django.http import HttpResponse, JsonResponse
 from django.utils import timezone
 from django.views.decorators.cache import never_cache
 from django.views.decorators.csrf import ensure_csrf_cookie
 from django.views.decorators.http import require_GET, require_http_methods, require_POST
+
+from cs_map_trainer.exporting import ASSUMPTIONS, COMPATIBILITY, EXPORTER_VERSION, SESSION_CHANGES
 
 from .identity import verified_email
 from .models import SteamIdentity, Upload
@@ -22,7 +24,11 @@ from .services import (
     complete,
     delete_account,
     delete_history,
+    get_training_selection,
     initiate,
+    save_training_selection,
+    training_export,
+    training_pack,
 )
 from .storage import R2
 
@@ -79,7 +85,7 @@ def serialize(upload, *, include_result=False):
         "compatibility": "unverified_in_game",
     }
     if include_result:
-        result.update(report=upload.report, scripts=upload.scripts)
+        result.update(report=upload.report, scripts=upload.scripts, selection=upload.selection)
     return result
 
 
@@ -94,7 +100,7 @@ def history(request):
                 serialize(upload)
                 for upload in Upload.objects.filter(owner=request.user)
                 .exclude(state=Upload.State.DELETED)
-                .defer("report", "scripts")
+                .defer("report", "scripts", "selection")
                 .order_by("-created_at")[:100]
             ],
         }
@@ -140,6 +146,62 @@ def upload_detail(request, upload_id):
         pk=upload_id, owner=request.user
     )
     return JsonResponse(serialize(upload, include_result=True))
+
+
+@require_http_methods(["GET", "POST"])
+@private
+def upload_selection(request, upload_id):
+    if request.method == "POST":
+        result = save_training_selection(request.user, upload_id, body(request))
+    else:
+        result = get_training_selection(request.user, upload_id)
+    return JsonResponse(result)
+
+
+@require_GET
+@private
+def upload_pack(request, upload_id):
+    if set(request.GET) - {"include_cfg"} or request.GET.getlist("include_cfg") not in (
+        [],
+        ["true"],
+        ["false"],
+    ):
+        raise IntakeError("invalid_export_parameters", 400)
+    pack = training_pack(
+        request.user, upload_id, include_cfg=request.GET.get("include_cfg") == "true"
+    )
+    response = HttpResponse(pack.archive, content_type="application/zip")
+    response["Content-Disposition"] = f'attachment; filename="training-{upload_id}.zip"'
+    return response
+
+
+@require_GET
+@private
+def upload_export(request, upload_id, scenario_id):
+    if set(request.GET) - {"format"} or request.GET.getlist("format") not in (
+        [],
+        ["json"],
+        ["cfg"],
+    ):
+        raise IntakeError("invalid_export_parameters", 400)
+    scenario, exported = training_export(request.user, upload_id, scenario_id)
+    if request.GET.get("format") == "cfg":
+        response = HttpResponse(exported.cfg, content_type="text/plain; charset=utf-8")
+        response["Content-Disposition"] = 'attachment; filename="scenario.cfg"'
+        return response
+    return JsonResponse(
+        {
+            "scenario_id": scenario.scenario_id,
+            "console_line": exported.console_line,
+            "exporter_version": EXPORTER_VERSION,
+            "compatibility": COMPATIBILITY,
+            "map": scenario.map.model_dump(),
+            "source": scenario.source.model_dump(),
+            "limitations": scenario.limitations,
+            "assumptions": list(ASSUMPTIONS),
+            "session_changes": list(SESSION_CHANGES),
+        }
+    )
 
 
 @require_POST
