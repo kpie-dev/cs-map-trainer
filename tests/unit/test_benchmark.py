@@ -10,15 +10,15 @@ from cs_map_trainer.parsing import DemoError
 from cs_map_trainer.scenarios import MapIdentity
 
 
-@pytest.fixture
-def report():
+@pytest.fixture(params=["de_mirage", "de_dust2"])
+def report(request):
     return AnalysisReport(
         status="no_eligible_duels",
         parser_version="3.1.1",
         rules_version="damage-window-v2",
         player_steam_id="76561198000000001",
         demo_sha256="0" * 64,
-        map=MapIdentity(name="de_mirage", game_build=1, revision="test-unverified"),
+        map=MapIdentity(name=request.param, game_build=1, revision="test-unverified"),
         contact_window_ticks=128,
         group_cell_units=256.0,
         deaths_considered=0,

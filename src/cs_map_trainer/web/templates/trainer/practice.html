@@ -1,0 +1,10 @@
+{% extends "trainer/base.html" %}
+{% block content %}
+<div class="page-heading"><span class="eyebrow">PERSONAL PRACTICE</span><h1>Your practice queue</h1><p>Scenarios selected from your saved reports. Ratings are your own feedback, not results measured in CS2.</p></div>
+<nav class="tabs" aria-label="Practice filter"><a href="?filter=due" {% if category == 'due' %}aria-current="page"{% endif %}>Due and new</a><a href="?filter=upcoming" {% if category == 'upcoming' %}aria-current="page"{% endif %}>Upcoming</a><a href="?filter=dismissed" {% if category == 'dismissed' %}aria-current="page"{% endif %}>Dismissed</a></nav>
+<section class="panel">
+{% for entry in page %}<article class="queue-row"><div><span class="eyebrow">{{ entry.scenario.map.name|upper }} / ROUND {{ entry.scenario.source.round_number }}</span><h2>{{ entry.scenario.player.weapon }} vs {{ entry.scenario.opponent.weapon }}</h2><p class="telemetry">{{ entry.upload.created_at|date:"j M Y, H:i" }} UTC / {{ entry.scenario.scenario_id }}</p>{% if entry.review %}<span class="badge">{{ entry.review.get_rating_display }}</span>{% if entry.review.due_at %}<p>Due: {{ entry.review.due_at|date:"j M Y, H:i" }} UTC</p>{% else %}<p>Removed from practice until you restore it.</p>{% endif %}{% else %}<p class="cyan">New scenario / not rated</p>{% endif %}</div><div class="actions"><a class="button primary" href="{% url 'training' entry.upload.pk %}?scenario={{ entry.scenario.scenario_id }}">Open practice</a>{% if category == 'dismissed' %}<form method="post" action="{% url 'review' entry.upload.pk entry.scenario.scenario_id %}">{% csrf_token %}<button type="submit" name="rating" value="restore">Restore</button></form>{% endif %}</div></article>
+{% empty %}<h2>No scenarios in this queue</h2><p>Select scenarios in a report or check another practice tab.</p><a href="{% url 'history' %}">View analyses</a>{% endfor %}
+</section>
+{% include "trainer/pagination.html" %}
+{% endblock %}

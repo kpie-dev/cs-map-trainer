@@ -1,0 +1,23 @@
+x-local-storage: &local-storage
+  R2_ENDPOINT: http://storage:5000
+  R2_BUCKET: local-demo-inputs
+  R2_ACCESS_KEY_ID: local-upload-test
+  R2_SECRET_ACCESS_KEY: ${PGPASSWORD:?Set PGPASSWORD in .env}
+
+services:
+  storage:
+    image: motoserver/moto@sha256:59a1965d845249b04def37a0e2565f9cc6c44543cb89b68e90f28f344b3b0d1a
+    environment:
+      MOTO_SERVICE: s3
+    mem_limit: 2g
+
+  web:
+    environment: *local-storage
+
+  worker:
+    image: cs-map-trainer-ui-web
+    environment: *local-storage
+
+  maintenance:
+    image: cs-map-trainer-ui-web
+    environment: *local-storage

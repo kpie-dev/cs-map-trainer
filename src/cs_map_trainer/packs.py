@@ -18,6 +18,7 @@ from cs_map_trainer.exporting import (
     ExportError,
     export_scenario,
 )
+from cs_map_trainer.maps import SUPPORTED_MAPS, Integration, map_label
 from cs_map_trainer.scenarios import ContractModel, MapIdentity, ScenarioDocument, Source
 
 
@@ -35,7 +36,7 @@ class PackManifest(ContractModel):
     scenario_schema_version: Literal[1] = 1
     exporter_version: str
     compatibility: Literal["unverified_in_game"]
-    integration: Literal["yprac_hub_mirage_sandbox"] = "yprac_hub_mirage_sandbox"
+    integration: Integration = "yprac_hub_mirage_sandbox"
     workshop_id: str
     assumed_bot_player_index: int
     assumed_bot_entity_index: int
@@ -102,40 +103,48 @@ def select_scenarios(
 
 
 def _instructions(manifest: PackManifest) -> str:
+    targets = "\n".join(
+        f"- {entry.console_file}"
+        f"{f' / {entry.cfg_file}' if entry.cfg_file else ''}: "
+        f"{map_label(entry.map.name)} ({entry.map.name}) / Sandbox."
+        for entry in manifest.entries
+    )
     return (
-        "# Yprac training prototype — niezweryfikowane w grze\n\n"
+        "# Yprac training prototype — not verified in game\n\n"
         f"Exporter: {manifest.exporter_version}; compatibility: {manifest.compatibility}.\n"
-        f"Target: Yprac Hub {manifest.workshop_id}, Mirage / Sandbox.\n\n"
-        "To prototyp komend, nie dowód działającego importu ani dostępności trybu.\n"
-        "Wymagany klient Yprac, dostęp do właściwego Mirage/Sandbox, zgodna geometria\n"
-        "i uprawnienia do sv_cheats/komend encji. Zweryfikuj wymagania klienta\n"
-        "i mapę przed użyciem. Nie używaj na matchmakingu ani współdzielonym serwerze.\n"
-        "Sesja musi być lokalna i odizolowana: tylko człowiek i jeden bot.\n\n"
-        "Po wejściu do mapy i Sandbox skopiuj CAŁĄ pojedynczą linię z jednego\n"
-        "pliku console/*.txt i wklej ją raz do konsoli. Jeden scenariusz naraz.\n"
-        "Powtórka: ponownie wklej tę samą linię; nie zakładamy, że chatowy restart\n"
-        "zachowuje ustawienie. Opcjonalne cfg/*.cfg wykonują tę samą sekwencję.\n"
-        "Opcjonalnie skopiuj CFG do własnego katalogu game/csgo/cfg/cmt_v1,\n"
-        "bez nadpisywania plików, i uruchom np. exec cmt_v1/scenario-0001.cfg.\n"
-        "Nie łącz plików wielu scenariuszy w jedno wklejenie.\n\n"
-        f"Indeks gracza bota {manifest.assumed_bot_player_index} i indeks jego encji/pawn "
-        f"{manifest.assumed_bot_entity_index} to DWA ODRĘBNE ZAŁOŻENIA.\n"
-        "Nie ma dynamicznego wyszukiwania indeksu. ent_setname nadaje nazwę encji "
+        f"Target: Yprac Hub {manifest.workshop_id}, Sandbox.\n"
+        f"Map for each file:\n{targets}\n\n"
+        "These are prototype commands, not proof of a working import or available game mode.\n"
+        "You need the Yprac client, access to the correct map and Sandbox, compatible geometry,\n"
+        "and permission to use sv_cheats and entity commands. Check the client requirements\n"
+        "and map before use. Do not use in matchmaking or on a shared server.\n"
+        "Use an isolated local session with one human player and one bot only.\n\n"
+        "Once you have opened the correct map in Sandbox, copy the ENTIRE line from one\n"
+        "console/*.txt file and paste it once into the console. Use one scenario at a time.\n"
+        "Before using a file for another map, switch to that map in Sandbox.\n"
+        "To repeat a setup, paste the same line again. A chat restart is not assumed to\n"
+        "preserve the setup. Optional cfg/*.cfg files run the same command sequence.\n"
+        "To use a CFG, copy it to your own game/csgo/cfg/cmt_v1 directory without\n"
+        "overwriting files, then run e.g. exec cmt_v1/scenario-0001.cfg.\n"
+        "Do not combine multiple scenarios into one paste.\n\n"
+        f"Bot player index {manifest.assumed_bot_player_index} and pawn entity index "
+        f"{manifest.assumed_bot_entity_index} are TWO SEPARATE ASSUMPTIONS.\n"
+        "Indices are not detected dynamically. ent_setname names entity "
         f"{manifest.assumed_bot_entity_index};\n"
-        "point_teleport próbuje ustawić jej pozycję i orientację. Nie potwierdzono\n"
-        "kierunku OCZU bota, gotowości po dodaniu ani kolejności wykonania.\n"
-        "Średniki nie czekają na spawn, obsługę chatu ani operacje entity I/O.\n"
-        "Brak błędu generowania nie oznacza poprawnego ustawienia w grze.\n\n"
-        "Komendy wyrzucają wszystkie boty, zmieniają drużynę, pozycję, kąty i broń\n"
-        "gracza oraz globalne ustawienia sesji. Nie zapisują poprzednich wartości.\n"
-        "Nie zmieniają bindów ani autoexec.cfg. Po zakończeniu opuść tę sesję;\n"
-        "przed dalszą grą sprawdź ustawienia. Pełna lista zmian jest w manifeście.\n\n"
-        "scenarios.json i manifest.json zawierają źródła i ograniczenia; mogą\n"
-        "zawierać identyfikatory graczy. Nie publikuj paczki jako logu.\n"
-        "opponent_aim_inferred_toward_player oznacza przybliżony kierunek, nie\n"
-        "pomiar z dema. Nie odtwarzamy ruchu, zdrowia, pancerza ani zachowania bota.\n\n"
-        "Odbiór wymaga osobnych prób CS2/Yprac: indeksy, gotowość, XYZ, oczy,\n"
-        "broń i strony obu uczestników, zgodność mapy i powtarzalność.\n"
+        "point_teleport attempts to set its position and orientation. The bot's EYE direction,\n"
+        "spawn readiness and command ordering have not been verified.\n"
+        "Semicolons do not wait for spawning, chat handling or entity I/O operations.\n"
+        "Successful command generation does not confirm a correct in-game setup.\n\n"
+        "Commands kick all existing bots and change the player's team, position, aim angles\n"
+        "and weapon, as well as global session settings. Previous values are not saved.\n"
+        "Binds and autoexec.cfg are not changed. Leave the session when finished and check\n"
+        "your settings before playing elsewhere. See the manifest for the full list of changes.\n\n"
+        "scenarios.json and manifest.json contain source metadata and limitations, and may\n"
+        "include player identifiers. Do not publish the pack as a diagnostic log.\n"
+        "opponent_aim_inferred_toward_player marks estimated aim, not aim measured from\n"
+        "the demo. Movement, health, armor and human opponent behavior are not reconstructed.\n\n"
+        "Separate CS2/Yprac checks are required for indices, spawn readiness, XYZ positions,\n"
+        "eye direction, both players' weapons and teams, map compatibility and repeatability.\n"
     )
 
 
@@ -172,6 +181,11 @@ def build_pack(
     manifest = PackManifest(
         exporter_version=EXPORTER_VERSION,
         compatibility=COMPATIBILITY,
+        integration=(
+            SUPPORTED_MAPS[selected.scenarios[0].map.name].integration
+            if len({scenario.map.name for scenario in selected.scenarios}) == 1
+            else "yprac_hub_multi_map_sandbox"
+        ),
         workshop_id=WORKSHOP_ID,
         assumed_bot_player_index=BOT_PLAYER_INDEX,
         assumed_bot_entity_index=BOT_ENTITY_INDEX,

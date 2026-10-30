@@ -2,12 +2,16 @@
 
 import math
 import os
+import shutil
 from collections import Counter
 from pathlib import Path
+from types import SimpleNamespace
 
 import pytest
 
 from cs_map_trainer.analysis import analyze, roster
+from cs_map_trainer.exporting import export_scenario
+from cs_map_trainer.packs import build_pack, load_scenarios
 from cs_map_trainer.parsing import DemoReader
 from cs_map_trainer.scenarios import ScenarioDocument
 
@@ -16,11 +20,11 @@ from cs_map_trainer.scenarios import ScenarioDocument
 def demo_path():
     value = os.environ.get("CS_MAP_TRAINER_DEMO")
     if not value:
-        pytest.skip("Set CS_MAP_TRAINER_DEMO to an authorized local Mirage .dem")
+        pytest.skip("Set CS_MAP_TRAINER_DEMO to an authorized local Mirage or Dust2 .dem")
     return Path(value)
 
 
-def test_real_demo_pipeline(demo_path):
+def test_real_demo_pipeline(demo_path, tmp_path):
     reader = DemoReader(demo_path)
     players = roster(reader)
     _, kills, _ = reader.combat()
@@ -42,6 +46,13 @@ def test_real_demo_pipeline(demo_path):
     )
     assert report.eligible_candidates > 0
     document = ScenarioDocument.model_validate_json(report.scenario_document.model_dump_json())
+    assert report.map == reader.map
+    assert all(scenario.map == report.map for scenario in document.scenarios)
+    pack = build_pack(load_scenarios(report.model_dump_json().encode()), include_cfg=True)
+    assert pack.manifest.compatibility == "unverified_in_game"
+    assert [entry.map for entry in pack.manifest.entries] == [
+        scenario.map for scenario in document.scenarios
+    ]
     assert len(document.scenarios) <= 10
     ticks = sorted({scenario.source.snapshot_tick for scenario in document.scenarios})
     snapshots = reader.snapshots(ticks).to_dicts()
@@ -71,3 +82,25 @@ def test_real_demo_pipeline(demo_path):
                     yaw = math.degrees(math.atan2(dy, dx))
             assert participant.view_angles.pitch == pytest.approx(pitch)
             assert participant.view_angles.yaw == pytest.approx((yaw + 180) % 360 - 180)
+
+    from cs_map_trainer.web.tasks import run_parser
+
+    input_path = tmp_path / "input.dem"
+    shutil.copyfile(demo_path, input_path)
+    try:
+        worker_report, scripts = run_parser(SimpleNamespace(identity_id=selected_id), tmp_path)
+    finally:
+        input_path.unlink()
+        (tmp_path / "result.json").unlink(missing_ok=True)
+    assert worker_report["map"] == report.map.model_dump()
+    assert worker_report["eligible_candidates"] == report.eligible_candidates
+    assert worker_report["eligible_wins"] == report.eligible_wins
+    assert worker_report["scenario_document"] == document.model_dump(mode="json")
+    assert scripts == [
+        {
+            "scenario_id": scenario.scenario_id,
+            "console_line": export_scenario(scenario).console_line,
+            "error": None,
+        }
+        for scenario in document.scenarios
+    ]

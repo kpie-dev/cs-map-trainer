@@ -1,0 +1,41 @@
+{% load static %}
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="referrer" content="same-origin">
+  <title>{% block head_title %}CS2 Demo Rewind{% endblock %}</title>
+  <link rel="stylesheet" href="{% static 'trainer/app.css' %}">
+  <script src="{% static 'trainer/app.js' %}" defer></script>
+  {% block extra_head %}{% endblock %}
+</head>
+<body>
+<a class="skip-link" href="#content">Skip to content</a>
+<header class="topbar">
+  <a class="brand" href="{% url 'home' %}"><span class="reticle" aria-hidden="true">+</span><span>CS2 DEMO REWIND<small>YOUR DUELS / YOUR PRACTICE</small></span></a>
+  <span class="badge">BETA / PROTOTYPE</span>
+  <div class="identity">
+    {% if steam_identity %}<span class="telemetry cyan">STEAM: {{ steam_identity.pk }}</span><span class="badge">{% if paid_plan %}PRO / UNLIMITED{% else %}{{ quota_used }}/{{ quota_limit }} / UTC MONTH{% endif %}</span>{% endif %}
+    {% if user.is_authenticated %}<a class="button small" href="{% url 'account' %}">Account</a>{% else %}<a class="button small" href="{% url 'account_login' %}">Sign in</a>{% endif %}
+  </div>
+</header>
+<div class="shell">
+  <nav class="sidebar" aria-label="Main navigation">
+    <span class="eyebrow">PRACTICE HUB</span>
+    <a href="{% url 'home' %}" {% if request.resolver_match.url_name == 'home' %}aria-current="page"{% endif %}>01 / Upload demo</a>
+    <a href="{% url 'history' %}" {% if request.resolver_match.url_name == 'history' or request.resolver_match.url_name == 'report' %}aria-current="page"{% endif %}>02 / My analyses</a>
+    <a href="{% url 'practice' %}" {% if request.resolver_match.url_name == 'practice' or request.resolver_match.url_name == 'training' %}aria-current="page"{% endif %}>03 / Practice</a>
+    <a href="{% url 'account' %}" {% if request.resolver_match.url_name == 'account' %}aria-current="page"{% endif %}>04 / Account</a>
+    <div class="sidebar-note"><span class="eyebrow">EXPORT TARGET</span><strong>Mirage or Dust2 / Sandbox</strong><p>Yprac Hub 3070715607</p><span class="badge warning">NOT VERIFIED IN GAME</span></div>
+  </nav>
+  <main id="content" class="{% if '/accounts/' in request.path %}auth-layout{% endif %}">
+    {% for message in messages %}<div class="notice {{ message.tags }}" role="status">{{ message }}</div>{% endfor %}
+    {% block content %}{% endblock %}
+  </main>
+</div>
+<footer>CS2 DEMO REWIND <span>/</span> Duel setups for practice, not a verdict on your skill.</footer>
+{{ ui_errors|json_script:"ui-errors" }}
+{% block extra_body %}{% endblock %}
+</body>
+</html>

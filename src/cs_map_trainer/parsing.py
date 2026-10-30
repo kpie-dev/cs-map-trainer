@@ -7,6 +7,7 @@ import polars as pl
 from awpy import Demo, InvalidDemoError
 from pydantic import ValidationError
 
+from cs_map_trainer.maps import SUPPORTED_MAP_NAMES, SUPPORTED_MAPS
 from cs_map_trainer.scenarios import MapIdentity
 
 PARSER_VERSION = "3.1.1"
@@ -45,8 +46,8 @@ class DemoReader:
             )
         except (KeyError, ValidationError) as error:
             raise DemoError("Demo is missing a valid map name or game build") from error
-        if self.map.name != "de_mirage":
-            raise DemoError("This first analysis version supports de_mirage only")
+        if self.map.name not in SUPPORTED_MAPS:
+            raise DemoError(f"Supported analysis maps: {SUPPORTED_MAP_NAMES}")
 
     def players(self) -> pl.DataFrame:
         return self.demo.players

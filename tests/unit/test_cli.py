@@ -116,21 +116,23 @@ def test_invalid_benchmark_options_are_usage_errors(option):
     assert error.value.code == 2
 
 
-@pytest.fixture
-def fake_demo(monkeypatch):
+@pytest.fixture(params=["de_mirage", "de_dust2"])
+def fake_demo(monkeypatch, request):
     reader = SimpleNamespace(
-        map=MapIdentity(name="de_mirage", game_build=1, revision="test-unverified"),
+        map=MapIdentity(name=request.param, game_build=1, revision="test-unverified"),
         players=lambda: pl.DataFrame(
             [{"steamid": 76561198000000001, "name": 'Łukasz; "quit"', "side": "terrorist"}]
         ),
     )
     monkeypatch.setattr("cs_map_trainer.parsing.DemoReader", lambda path: reader)
+    return reader
 
 
 def test_roster_stdout_is_json_not_console_commands(fake_demo, capsys):
     assert main(["players", "test.dem"]) == 0
     output = capsys.readouterr()
     assert json.loads(output.out)["players"][0]["name"] == 'Łukasz; "quit"'
+    assert json.loads(output.out)["map"] == fake_demo.map.model_dump()
     assert output.err == ""
 
 

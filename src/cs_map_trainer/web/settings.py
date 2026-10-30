@@ -23,12 +23,14 @@ INSTALLED_APPS = [
 ]
 MIDDLEWARE = [
     "django.middleware.security.SecurityMiddleware",
+    "django.middleware.clickjacking.XFrameOptionsMiddleware",
     "django.contrib.sessions.middleware.SessionMiddleware",
     "django.middleware.common.CommonMiddleware",
     "django.middleware.csrf.CsrfViewMiddleware",
     "django.contrib.auth.middleware.AuthenticationMiddleware",
     "django.contrib.messages.middleware.MessageMiddleware",
     "allauth.account.middleware.AccountMiddleware",
+    "cs_map_trainer.web.middleware.PrivateResponseMiddleware",
 ]
 DATABASES = {
     "default": {
@@ -43,12 +45,14 @@ DATABASES = {
 TEMPLATES = [
     {
         "BACKEND": "django.template.backends.django.DjangoTemplates",
+        "DIRS": [Path(__file__).parent / "templates"],
         "APP_DIRS": True,
         "OPTIONS": {
             "context_processors": [
                 "django.template.context_processors.request",
                 "django.contrib.auth.context_processors.auth",
                 "django.contrib.messages.context_processors.messages",
+                "cs_map_trainer.web.presentation.ui_context",
             ]
         },
     }
@@ -84,8 +88,12 @@ SOCIALACCOUNT_PROVIDERS = {
         }
     }
 }
-LOGIN_REDIRECT_URL = "/backend/history/"
+LOGIN_URL = "/accounts/login/"
+LOGIN_REDIRECT_URL = "/history/"
 ACCOUNT_LOGOUT_REDIRECT_URL = "/accounts/login/"
+LANGUAGE_CODE = "en"
+LANGUAGES = [("en", "English")]
+USE_I18N = False
 EMAIL_BACKEND = "django.core.mail.backends.smtp.EmailBackend"
 EMAIL_HOST = os.environ.get("EMAIL_HOST", "localhost")
 EMAIL_PORT = int(os.environ.get("EMAIL_PORT", "587"))
@@ -97,6 +105,9 @@ DEFAULT_FROM_EMAIL = os.environ.get("DEFAULT_FROM_EMAIL", "trainer@localhost")
 SESSION_COOKIE_SECURE = not DEBUG
 CSRF_COOKIE_SECURE = not DEBUG
 SECURE_SSL_REDIRECT = not DEBUG
+SECURE_PROXY_SSL_HEADER = (
+    ("HTTP_X_FORWARDED_PROTO", "https") if os.environ.get("DJANGO_TRUST_PROXY") == "1" else None
+)
 SECURE_CONTENT_TYPE_NOSNIFF = True
 SECURE_HSTS_SECONDS = 0 if DEBUG else 31536000
 SESSION_COOKIE_HTTPONLY = True
@@ -116,7 +127,12 @@ R2_ACCESS_KEY_ID = os.environ.get("R2_ACCESS_KEY_ID", "")
 R2_SECRET_ACCESS_KEY = os.environ.get("R2_SECRET_ACCESS_KEY", "")
 UPLOAD_URL_SECONDS = 900
 UPLOAD_EXPIRE_SECONDS = 86400
-DEMO_WEEKLY_LIMIT = 3
+DEMO_MONTHLY_LIMIT = 3
+PUBLIC_BASE_URL = os.environ.get("PUBLIC_BASE_URL", "")
+STRIPE_SECRET_KEY = os.environ.get("STRIPE_SECRET_KEY", "")
+STRIPE_PRICE_ID = os.environ.get("STRIPE_PRICE_ID", "")
+STRIPE_WEBHOOK_SECRET = os.environ.get("STRIPE_WEBHOOK_SECRET", "")
+STRIPE_PORTAL_CONFIGURATION_ID = os.environ.get("STRIPE_PORTAL_CONFIGURATION_ID", "")
 PARSER_TIMEOUT_SECONDS = int(os.environ.get("PARSER_TIMEOUT_SECONDS", "300"))
 PARSER_MEMORY_BYTES = int(os.environ.get("PARSER_MEMORY_BYTES", str(4 * 1024**3)))
 WORK_ROOT = Path(os.environ.get("WORK_ROOT", "/tmp/cmt-work"))

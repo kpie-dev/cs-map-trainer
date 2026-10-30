@@ -2,6 +2,7 @@ x-app: &app
   build:
     context: .
     dockerfile: Dockerfile.web
+    target: web
   env_file: .env
   environment:
     PGHOST: db

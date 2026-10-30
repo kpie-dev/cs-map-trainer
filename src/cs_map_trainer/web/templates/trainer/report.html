@@ -1,0 +1,39 @@
+{% extends "trainer/base.html" %}
+{% load trainer_labels %}
+{% block content %}
+<a class="back-link" href="{% url 'history' %}">← My analyses</a>
+<header class="panel page-heading"><div class="section-top"><span class="badge cyan">{% if analysis %}{{ analysis.map.name|upper }}{% else %}{{ map_label }}{% endif %}</span><span class="telemetry">{{ upload.created_at|date:"j M Y, H:i" }} UTC</span></div><h1>Analysis report</h1><p class="telemetry">{{ upload.pk }}</p><p>Analyzed SteamID: <strong>{{ upload.identity_id }}</strong></p><span class="badge warning">NOT VERIFIED IN GAME</span></header>
+{% if active %}
+<section class="panel" id="job-status" data-status-url="/backend/uploads/{{ upload.pk }}/">
+  <span class="eyebrow">ANALYSIS STATUS</span><h2 id="job-state">{{ state_label }}</h2><p id="job-feedback" role="status">Status updates every 5 seconds for up to 10 minutes. This does not restart the analysis.</p>
+  {% if upload.state == 'uploading' %}<p>If the transfer is unfinished, return to your upload page. If you closed it, choose the same file again. An abandoned upload reservation expires after 24 hours.</p>{% endif %}
+  <button type="button" id="refresh-status">Refresh status</button>
+  <noscript><p>Reload this page to check the status.</p></noscript>
+</section>
+{% elif analysis %}
+<section class="metrics">
+  <article class="panel"><span class="eyebrow">ELIGIBLE LOST DUELS</span><strong>{{ analysis.eligible_candidates }}</strong><small>Of {{ analysis.deaths_considered }} deaths considered</small></article>
+  <article class="panel"><span class="eyebrow">COMPARABLE WINS</span><strong class="cyan">{{ analysis.eligible_wins }}</strong><small>Of {{ analysis.kills_considered }} kills considered</small></article>
+  <article class="panel"><span class="eyebrow">SELECTED FOR PRACTICE</span><strong class="green">{{ selected_count|default:0 }}</strong><small>Omitted by the scenario limit: {{ analysis.omitted_by_limit }}</small></article>
+</section>
+<div class="notice"><strong>How to read this report</strong> These are practice candidates, not proof of mistakes. Win rate covers only filtered duels with a kill or death in each group, not every encounter or your overall performance. Small samples do not support strong conclusions.</div>
+<section class="panel"><h2>Recurring duel setups</h2><p>Ranked by number of losses. Duels with estimated opponent aim are grouped separately.</p>
+<div class="table-scroll"><table><thead><tr><th>Group / teams and weapons</th><th>Sample</th><th>Wins</th><th>Losses</th><th>Win rate</th></tr></thead><tbody>
+{% for group in analysis.groups %}<tr><td><strong>{{ group.group_id }}</strong><small>{{ group.player_side }} / {{ group.player_weapon }} vs {{ group.opponent_weapon }}</small><small>Player grid cell {{ group.player_cell }} / opponent {{ group.opponent_cell }}</small>{% for code in group.context_limitations %}<small>{{ code|limitation_label }} <span class="telemetry">({{ code }})</span></small>{% endfor %}</td><td>{{ group.observations }}</td><td class="green">{{ group.wins }}</td><td>{{ group.losses }}</td><td>{{ group.win_rate|floatformat:3 }} <small>(fraction from 0 to 1)</small></td></tr>
+{% empty %}<tr><td colspan="5">No comparable groups found.</td></tr>{% endfor %}
+</tbody></table></div></section>
+{% if situations %}
+<section class="panel"><div class="section-top"><h2>Choose your duels</h2><a class="button primary" href="{% url 'training' upload.pk %}">Open practice</a></div><p>All scenarios are selected by default. Skipping a scenario is not the same as rating it “Not useful”. Save your changes before opening practice. Keep at least one scenario in your selection.</p>
+<form method="post" action="{% url 'selection' upload.pk %}">{% csrf_token %}
+{% for item in situations %}<article class="situation"><div class="section-top"><h3>Round {{ item.scenario.source.round_number }}</h3><span class="telemetry">{{ item.scenario.scenario_id }}</span></div><p><span class="amber">{{ item.scenario.player.side }} / {{ item.scenario.player.weapon }}</span> vs <span class="cyan">{{ item.scenario.opponent.side }} / {{ item.scenario.opponent.weapon }}</span></p><p class="telemetry">SNAPSHOT {{ item.scenario.source.snapshot_tick }} / DAMAGE {{ item.scenario.source.contact_tick }} / DEATH {{ item.scenario.source.death_tick }}</p>
+<label for="choice-{{ forloop.counter }}">Use this scenario</label><select name="choice_{{ item.scenario.scenario_id }}" id="choice-{{ forloop.counter }}"><option value="include" {% if item.choice == 'include' %}selected{% endif %}>Include in practice</option><option value="omit" {% if item.choice == 'omit' %}selected{% endif %}>Skip for now</option><option value="reject" {% if item.choice == 'reject' %}selected{% endif %}>Reject from selection</option></select>
+<details><summary>Data and limitations</summary>{% include "trainer/participants.html" with current=item.scenario %}<ul>{% for code in item.scenario.limitations %}<li class="{% if code == 'opponent_aim_inferred_toward_player' %}warning{% endif %}">{{ code|limitation_label }} <span class="telemetry">({{ code }})</span></li>{% endfor %}</ul></details>
+</article>{% endfor %}
+<button type="submit" class="primary">Save selection</button></form>
+</section>
+{% else %}<section class="panel"><h2>No practice candidates found</h2><p>No lost duels met the analysis criteria. This does not mean you played without mistakes. The report may include comparable wins, but they cannot be exported as a practice pack.</p></section>{% endif %}
+<section class="panel"><h2>Limitations and exclusions</h2><ul>{% for text in limitations %}<li>{{ text }}</li>{% endfor %}</ul><details><summary>Excluded events</summary><h3>Losses</h3>{% for item in analysis.excluded %}<p>TICK {{ item.death_tick }} / {{ item.reason|exclusion_label }} <span class="telemetry">({{ item.reason }})</span></p>{% empty %}<p>None.</p>{% endfor %}<h3>Wins</h3>{% for item in analysis.excluded_wins %}<p>TICK {{ item.death_tick }} / {{ item.reason|exclusion_label }} <span class="telemetry">({{ item.reason }})</span></p>{% empty %}<p>None.</p>{% endfor %}</details><p class="telemetry">PARSER {{ analysis.parser_version }} / RULES {{ analysis.rules_version }} / BUILD {{ analysis.map.game_build }}</p><p class="telemetry">REVISION {{ analysis.map.revision }}</p></section>
+{% else %}<section class="panel danger"><h2>{{ state_label }}</h2><p role="alert">{{ failure|default:"Your upload reservation has expired. Start a new upload to analyze this demo." }}</p><a class="button" href="{% url 'home' %}">Start new upload</a></section>{% endif %}
+{% if upload.cleanup_pending %}<p class="notice warning">Deletion of the raw demo has not yet been confirmed. {% if upload.cleanup_error %}Error code: {{ upload.cleanup_error }}.{% endif %} Cleanup is retried separately; the analysis is not restarted.</p>{% endif %}
+{% if not active %}<section class="panel danger"><details><summary>Delete this report and ratings</summary><form action="{% url 'remove_upload' upload.pk %}" method="post">{% csrf_token %}<label class="check"><input type="checkbox" name="confirm" value="yes" required> Permanently delete this result, scenario selection and practice ratings.</label><button class="destructive" type="submit">Delete report</button></form></details></section>{% endif %}
+{% endblock %}

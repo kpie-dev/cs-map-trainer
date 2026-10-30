@@ -7,8 +7,10 @@ from functools import wraps
 from allauth.socialaccount.providers.steam.views import SteamOpenIDCallbackView, steam_login
 from django.conf import settings
 from django.contrib.auth import logout
+from django.core.exceptions import ImproperlyConfigured
 from django.db import transaction
 from django.http import HttpResponse, JsonResponse
+from django.shortcuts import render
 from django.utils import timezone
 from django.views.decorators.cache import never_cache
 from django.views.decorators.csrf import ensure_csrf_cookie
@@ -18,6 +20,7 @@ from cs_map_trainer.exporting import ASSUMPTIONS, COMPATIBILITY, EXPORTER_VERSIO
 
 from .identity import verified_email
 from .models import SteamIdentity, Upload
+from .presentation import error_message
 from .services import (
     STORAGE_ERRORS,
     IntakeError,
@@ -45,21 +48,35 @@ class PrivateSteamCallbackView(SteamOpenIDCallbackView):
 steam_callback = PrivateSteamCallbackView.as_view()
 
 
+def operation_error(request, code, status):
+    if "text/html" in request.headers.get("Accept", ""):
+        return render(
+            request,
+            "trainer/error.html",
+            {"error": error_message(code), "error_code": code},
+            status=status,
+        )
+    return JsonResponse({"error": code}, status=status)
+
+
 def private(view):
     @wraps(view)
     @never_cache
     def wrapped(request, *args, **kwargs):
         if not verified_email(request.user):
-            return JsonResponse({"error": "verified_email_required"}, status=403)
+            return operation_error(request, "verified_email_required", 403)
         try:
             return view(request, *args, **kwargs)
         except IntakeError as error:
-            return JsonResponse({"error": error.code}, status=error.status)
+            return operation_error(request, error.code, error.status)
         except Upload.DoesNotExist:
-            return JsonResponse({"error": "not_found"}, status=404)
+            return operation_error(request, "not_found", 404)
+        except ImproperlyConfigured:
+            logger.exception("Storage configuration missing for authenticated backend operation")
+            return operation_error(request, "storage_not_configured", 503)
         except STORAGE_ERRORS:
             logger.exception("Storage request failed for authenticated backend operation")
-            return JsonResponse({"error": "storage_unavailable"}, status=503)
+            return operation_error(request, "storage_unavailable", 503)
 
     return wrapped
 

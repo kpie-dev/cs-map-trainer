@@ -1,7 +1,7 @@
 import json
 import logging
 import uuid
-from datetime import timedelta
+from datetime import UTC, timedelta
 
 from botocore.exceptions import BotoCoreError, ClientError
 from django.conf import settings
@@ -37,7 +37,32 @@ class IntakeError(ValueError):
         super().__init__(code)
 
 
+def month_start(now=None):
+    return (
+        (now or timezone.now())
+        .astimezone(UTC)
+        .replace(
+            day=1,
+            hour=0,
+            minute=0,
+            second=0,
+            microsecond=0,
+        )
+    )
+
+
+def quota_used(identity):
+    return (
+        Upload.objects.filter(identity=identity, quota_charged=True)
+        .annotate(quota_at=Coalesce("accepted_at", "created_at"))
+        .filter(quota_at__gte=month_start())
+        .count()
+    )
+
+
 def initiate(user, request_id, size, storage=None):
+    from .billing import paid_access
+
     if type(size) is not int or not 8 <= size <= 1024**3:
         raise IntakeError("invalid_demo_size", 400)
     storage = storage or R2()
@@ -58,14 +83,9 @@ def initiate(user, request_id, size, storage=None):
             identity=identity, state__in=TERMINAL, cleanup_pending=True
         ).exists():
             raise IntakeError("input_cleanup_pending", 503)
-        used = (
-            Upload.objects.filter(identity=identity, quota_charged=True)
-            .annotate(quota_at=Coalesce("accepted_at", "created_at"))
-            .filter(quota_at__gt=now - timedelta(days=7))
-            .count()
-        )
-        if used >= settings.DEMO_WEEKLY_LIMIT:
-            raise IntakeError("weekly_demo_limit", 429)
+        used = quota_used(identity)
+        if used >= settings.DEMO_MONTHLY_LIMIT and not paid_access(identity):
+            raise IntakeError("monthly_demo_limit", 429)
         upload = Upload(
             owner=user,
             identity=identity,
@@ -127,13 +147,17 @@ def delete_history(user, upload_id):
         upload.scripts = None
         upload.selection = None
         upload.save(update_fields=["state", "report", "scripts", "selection"])
+        upload.practice_reviews.all().delete()
 
 
 def delete_account(user):
+    from .billing import close_account
+
     with transaction.atomic():
         identity = SteamIdentity.objects.select_for_update().filter(owner=user).first()
         if identity and Upload.objects.filter(identity=identity, state__in=ACTIVE).exists():
             raise IntakeError("processing_in_progress")
+        close_account(user)
         user.delete()
 
 
@@ -145,6 +169,21 @@ class TrainingSelection(ContractModel):
     reject: list[Identifier]
 
 
+def validated_report(upload):
+    try:
+        report = AnalysisReport.model_validate_json(json.dumps(upload.report))
+    except (ValueError, TypeError) as error:
+        logger.error("Invalid saved training report for upload %s", upload.pk)
+        raise IntakeError("invalid_saved_report", 500) from error
+    if report.player_steam_id != upload.identity_id:
+        logger.error("Saved report player mismatch for upload %s", upload.pk)
+        raise IntakeError("invalid_saved_report", 500)
+    if (report.status == "candidates_ready") != (report.scenario_document is not None):
+        logger.error("Saved report status/document mismatch for upload %s", upload.pk)
+        raise IntakeError("invalid_saved_report", 500)
+    return report
+
+
 def training_result(user, upload_id, *, lock=False):
     uploads = Upload.objects.exclude(state=Upload.State.DELETED)
     if lock:
@@ -152,23 +191,19 @@ def training_result(user, upload_id, *, lock=False):
     upload = uploads.get(pk=upload_id, owner=user)
     if upload.state != Upload.State.READY:
         raise IntakeError("result_not_ready")
-    try:
-        raw = json.dumps(upload.report)
-        report = AnalysisReport.model_validate_json(raw)
-    except (ValueError, TypeError) as error:
-        logger.error("Invalid saved training report for upload %s", upload.pk)
-        raise IntakeError("invalid_saved_report", 500) from error
-    if report.player_steam_id != upload.identity_id:
-        logger.error("Saved report player mismatch for upload %s", upload.pk)
-        raise IntakeError("invalid_saved_report", 500)
+    report = validated_report(upload)
+    return upload, training_document(upload, report)
+
+
+def training_document(upload, report):
     if report.status == "no_eligible_duels" and report.scenario_document is None:
         raise IntakeError("no_training_candidates")
     try:
-        document = load_scenarios(raw.encode("utf-8"))
+        document = load_scenarios(report.model_dump_json().encode("utf-8"))
     except (ValidationError, ExportError) as error:
         logger.error("Invalid saved training candidates for upload %s", upload.pk)
         raise IntakeError("invalid_saved_report", 500) from error
-    return upload, document
+    return document
 
 
 def saved_selection(upload, document):

@@ -1,0 +1,4 @@
+{% extends "trainer/base.html" %}
+{% block content %}
+<section class="panel danger"><span class="eyebrow">ACTION NOT COMPLETED</span><h1>Unable to continue</h1><p role="alert">{{ error }}</p><p class="telemetry">{{ error_code }}</p><div class="actions"><a class="button" href="{% url 'history' %}">My analyses</a><a href="{% url 'account' %}">Account</a></div></section>
+{% endblock %}

@@ -57,9 +57,10 @@ class FakeReader:
         return pl.DataFrame(self.snapshot_rows)
 
 
-@pytest.fixture
-def reader():
+@pytest.fixture(params=["de_mirage", "de_dust2"])
+def reader(request):
     reader = FakeReader()
+    reader.map = reader.map.model_copy(update={"name": request.param})
     reader.kill_rows = [
         {
             "tick": 120,
@@ -122,7 +123,20 @@ def test_analysis_report_can_be_exported_without_reparsing(reader):
     ]
     assert pack.manifest.entries[0].source.rules_version == "damage-window-v3"
     assert pack.manifest.compatibility == "unverified_in_game"
+    assert report.map == reader.map
+    assert all(entry.map == reader.map for entry in pack.manifest.entries)
     assert reader.requested_ticks == requested_ticks
+
+
+def test_negative_coordinates_and_height_cells_preserve_map(reader):
+    reader.snapshot_rows[0].update(x=-257.0, y=-1.0, z=513.0)
+    reader.snapshot_rows[1].update(x=-512.0, y=256.0, z=-1.0)
+    report = run(reader)
+    scenario = report.scenario_document.scenarios[0]
+    assert report.map == scenario.map == reader.map
+    assert scenario.player.position.model_dump() == {"x": -257.0, "y": -1.0, "z": 513.0}
+    assert report.groups[0].player_cell == (-2, -1, 2)
+    assert report.groups[0].opponent_cell == (-2, 1, -1)
 
 
 def test_shared_snapshot_precedes_first_damage_and_preserves_aim(reader):

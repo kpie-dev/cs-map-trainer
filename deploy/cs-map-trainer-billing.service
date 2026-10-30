@@ -1,0 +1,10 @@
+[Unit]
+Description=Reconcile CS Map Trainer Stripe subscriptions
+Requires=docker.service
+After=docker.service
+
+[Service]
+Type=oneshot
+WorkingDirectory=/opt/cs-map-trainer
+ExecStart=/usr/bin/docker compose -f compose.yml -f compose.production.yml exec -T web cs-map-trainer-web reconcile_subscriptions
+TimeoutStartSec=10min

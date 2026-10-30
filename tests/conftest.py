@@ -13,10 +13,10 @@ def payload():
     return json.loads(FIXTURE.read_text())
 
 
-@pytest.fixture
-def training_document(payload):
+@pytest.fixture(params=["de_mirage", "de_dust2"])
+def training_document(payload, request):
     scenario = payload["scenarios"][0]
-    scenario["map"]["name"] = "de_mirage"
+    scenario["map"]["name"] = request.param
     scenario["map"]["revision"] = "synthetic-export-test-not-runtime-evidence"
     scenario["limitations"] = [
         "synthetic_export_reference",

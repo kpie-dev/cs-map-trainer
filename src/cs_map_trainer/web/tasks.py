@@ -19,7 +19,7 @@ from cs_map_trainer.exporting import ExportError, export_scenario
 
 from .models import SteamIdentity, Upload
 from .processes import parser_slot
-from .services import STORAGE_ERRORS, TERMINAL, dispatch
+from .services import STORAGE_ERRORS, TERMINAL, dispatch, month_start
 from .storage import R2, InvalidUpload
 
 logger = logging.getLogger(__name__)
@@ -34,6 +34,7 @@ def run_parser(upload, directory, *, lock_fd=None):
     output = directory / "result.json"
     env = {key: os.environ[key] for key in ("PATH", "SYSTEMROOT", "LANG") if key in os.environ}
     env.update(
+        AWPY_DATA_DIR=str(directory / "awpy"),
         PARSER_MEMORY_BYTES=str(settings.PARSER_MEMORY_BYTES),
         PARSER_TIMEOUT_SECONDS=str(settings.PARSER_TIMEOUT_SECONDS),
         POLARS_MAX_THREADS="2",
@@ -62,7 +63,7 @@ def run_parser(upload, directory, *, lock_fd=None):
         if result["error"] != "unsupported_or_invalid_demo":
             raise ValueError("Invalid parser error")
         return None, None
-    report = AnalysisReport.model_validate(result["report"])
+    report = AnalysisReport.model_validate_json(json.dumps(result["report"]))
     if report.player_steam_id != upload.identity_id:
         raise ValueError("Parser returned a different player")
     # Derive commands from the validated report, never trust commands from a child payload.
@@ -246,7 +247,7 @@ def maintain():
         dispatch(upload.pk)
     Upload.objects.filter(state__in=TERMINAL, cleanup_pending=False).annotate(
         quota_at=Coalesce("accepted_at", "created_at")
-    ).filter(quota_at__lt=now - timedelta(days=7)).filter(
+    ).filter(quota_at__lt=month_start(now)).filter(
         Q(owner__isnull=True) | Q(state=Upload.State.DELETED)
     ).delete()
     SteamIdentity.objects.filter(owner__isnull=True, upload__isnull=True).delete()

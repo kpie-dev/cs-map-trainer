@@ -3,6 +3,7 @@
 from dataclasses import dataclass
 from decimal import Decimal
 
+from cs_map_trainer.maps import SUPPORTED_MAP_NAMES, SUPPORTED_MAPS
 from cs_map_trainer.scenarios import Scenario
 from cs_map_trainer.weapons import GUNS
 
@@ -24,7 +25,7 @@ ASSUMPTIONS = (
     "point_teleport_sets_bot_eye_angles_unverified",
     "console_entity_io_and_yprac_chat_ordering_unverified",
     "yprac_weapon_identifiers_and_active_weapon_unverified",
-    "mirage_geometry_and_client_access_unverified",
+    "target_map_geometry_and_client_access_unverified",
     "helper_entity_creation_and_cleanup_ordering_unverified",
 )
 SESSION_CHANGES = (
@@ -88,8 +89,8 @@ class ScenarioExport:
 
 def export_scenario(scenario: Scenario) -> ScenarioExport:
     scenario = Scenario.model_validate(scenario.model_dump())
-    if scenario.map.name != "de_mirage":
-        raise ExportError("Only de_mirage can be exported to the Yprac prototype")
+    if scenario.map.name not in SUPPORTED_MAPS:
+        raise ExportError(f"Supported Yprac prototype maps: {SUPPORTED_MAP_NAMES}")
     for participant in (scenario.player, scenario.opponent):
         if participant.weapon not in WEAPONS:
             raise ExportError("Unsupported participant weapon")

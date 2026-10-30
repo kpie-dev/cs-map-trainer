@@ -1,7 +1,7 @@
 # CS Map Trainer
 
 Narzędzie do przygotowania treningu własnych pojedynków z CS2. Obecnie **CLI czyta
-dema `.dem` z Mirage, wyświetla graczy i analizuje porównywalne wygrane oraz
+dema `.dem` z Mirage i Dust2, wyświetla graczy i analizuje porównywalne wygrane oraz
 przegrane pojedynki**. Wynikiem jest raport JSON z kandydatami do treningu
 przegranych sytuacji i ich ustawieniem przestrzennym. Działa też
 walidator kontraktu scenariuszy v1.
@@ -9,16 +9,21 @@ walidator kontraktu scenariuszy v1.
 **Jest prototyp eksportu do konsoli/CFG i paczek ZIP, nie ma potwierdzonego
 importu do gry.** Cel to
 [Yprac Hub by Yesber, Workshop `3070715607`](https://steamcommunity.com/sharedfiles/filedetails/?id=3070715607),
-Mirage/Sandbox. Eksporter zakłada osobno indeks gracza bota `2` i indeks jego
+Mirage lub Dust2 / Sandbox. Eksporter zakłada osobno indeks gracza bota `2` i indeks jego
 encji/pawn `2` po usunięciu botów. Nie wyszukuje indeksów dynamicznie.
 Pozycje, kierunek oczu, broń, kolejność wykonania i zgodność mapy nadal wymagają
 potwierdzenia w grze. Wyniki mają status `unverified_in_game`.
 Nie planujemy własnego serwera/pluginu.
 
-Istnieje też **minimalny backend Django/PostgreSQL/Django-Q2**, bez treningowego
-UI: konta e-mail, powiązanie Steam, prywatny upload R2, jednorazowa analiza
+Istnieje też **aplikacja Django/PostgreSQL/Django-Q2 z treningowym UI**:
+konta e-mail, powiązanie Steam, prywatny upload R2, jednorazowa analiza
 i prywatna historia z zapamiętywaniem wyboru sytuacji, eksportem pojedynczej
-linii komend i opcjonalnymi paczkami ZIP. Integracje z rzeczywistym R2, Steam i SMTP wymagają
+linii komend i opcjonalnymi paczkami ZIP. Responsywne szablony korzystają ze
+stylistyki Tactical HUD z `design/`, bez zewnętrznych skryptów i fikcyjnych statystyk.
+Są deklarowane oceny treningu i prosta kolejka powtórek, bez telemetrii z gry.
+Jest też moduł Stripe Billing: **Free — 3 analizy na miesiąc kalendarzowy UTC;
+Pro — 7,99 USD/mies. bez limitu liczby analiz własnego SteamID**.
+Integracje z rzeczywistym R2, Steam, SMTP i Stripe wymagają
 konfiguracji i osobnej próby przed wdrożeniem; testy z atrapami nie są jej dowodem.
 
 ## Uruchomienie
@@ -34,7 +39,8 @@ uv run cs-map-trainer schema
 
 ### Własne demo
 
-Obsługiwane są nieskompresowane dema CS2 `.dem`, do 1 GiB, z mapy `de_mirage`.
+Obsługiwane są nieskompresowane dema CS2 `.dem`, do 1 GiB, z map
+`de_mirage` i `de_dust2`. Mapa jest odczytywana z nagłówka dema, nie z nazwy pliku.
 Pliki CS:GO, archiwa i pozostałe mapy są jawnie odrzucane.
 
 ```sh
@@ -44,6 +50,12 @@ uv run cs-map-trainer players data/match.dem
 uv run cs-map-trainer analyze data/match.dem \
   --steam-id 76561198000000001 \
   --output results/report.json
+
+# Tak samo dla uprawnionego dema Dust2; użyj SteamID z polecenia players.
+uv run cs-map-trainer players data/dust2.dem
+uv run cs-map-trainer analyze data/dust2.dem \
+  --steam-id 76561198000000001 \
+  --output results/dust2-report.json
 ```
 
 SteamID w przykładzie jest syntetyczny: zastąp go identyfikatorem z polecenia
@@ -147,7 +159,12 @@ zamiast zostać po cichu pominięta. Można ją jawnie odrzucić.
 ZIP zawiera `manifest.json`, wybrane `scenarios.json`, `README.txt`,
 `console/scenario-NNNN.txt` i opcjonalnie `cfg/scenario-NNNN.cfg`.
 Każdy TXT ma **jedną linię jednego scenariusza** do wklejenia po wejściu
-do właściwego Mirage/Sandbox z klientem Yprac. Powtórzenie polega na ponownym
+do właściwej mapy/Sandbox z klientem Yprac. Instrukcje wskazują mapę każdego
+pliku; przy paczce mieszanej Mirage/Dust2 trzeba zmieniać sesję na właściwą mapę.
+Manifest zachowuje `yprac_hub_mirage_sandbox` dla Mirage, używa
+`yprac_hub_dust2_sandbox` dla Dust2 i `yprac_hub_multi_map_sandbox` dla wyboru
+mieszanego. Format paczki pozostaje v1; stare manifesty Mirage są obsługiwane.
+Powtórzenie polega na ponownym
 wklejeniu tej samej linii, nie na niepotwierdzonym zachowaniu `restart`.
 Pliki są numerowane niezależnie od ID; manifest mapuje je na źródłowe sytuacje
 i zapisuje wybór, odrzucenia, źródła, ograniczenia i wersję eksportera
@@ -176,7 +193,7 @@ encji `2`. Nie zapisują poprzednich wartości; manifest zawiera pełną listę
 zmian. Po treningu opuść sesję i sprawdź ustawienia przed dalszą grą.
 Nie używaj na matchmakingu ani współdzielonym serwerze.
 
-Walidacja eksportera dopuszcza tylko `de_mirage`, jawną listę broni palnych,
+Walidacja eksportera dopuszcza tylko `de_mirage` i `de_dust2`, jawną listę broni palnych,
 skończone XYZ w zakresie ±16384 i roll `0`. Zachowuje pitch/yaw i oznaczenia
 przybliżenia przeciwnika. Budżet pojedynczej linii to 1023 bajty ASCII;
 to limit prototypu, nie potwierdzona pojemność konsoli w danym buildzie.
@@ -293,10 +310,11 @@ uv build
 
 Awpy 3.1.1 jest przypiętym parserem, a `uv.lock` obejmuje jego zależności.
 Domyślne testy nie pobierają dem. Test integracyjny można uruchomić na lokalnym,
-dopuszczonym do przetwarzania demie Mirage zawierającym kwalifikujące się starcia:
+dopuszczonym do przetwarzania demie Mirage lub Dust2 zawierającym kwalifikujące się starcia:
 
 ```sh
 CS_MAP_TRAINER_DEMO=data/match.dem uv run pytest tests/integration
+# Alternatywnie: CS_MAP_TRAINER_DEMO=data/dust2.dem
 ```
 
 Pipeline oraz powtarzane przebiegi w osobnych procesach sprawdzono na publicznych
@@ -310,18 +328,81 @@ Nie dołączamy dema ani danych zawodników do repozytorium lub obrazu.
 To próby integracyjne dwóch źródeł, nie pełny benchmark na docelowym VPS,
 ręczne oznaczenie każdego kontaktu ani ocena trenera.
 
-## Minimalny backend
+Na uprawnionym lokalnym demie Dust2 sprawdzono również analizę, zgodność XYZ
+i kątów z migawkami, eksport paczki oraz rzeczywisty proces potomny parsera
+używany przez worker. Nagłówek potwierdził `de_dust2`, build `10924`.
+Nie jest to odbiór rzeczywistych R2/Steam ani komend w CS2/Yprac.
+
+## Aplikacja webowa i backend
 
 Stos: Django 5.2, PostgreSQL, Django-Q2 z brokerem ORM i jeden worker.
-Nie ma osobnego frontendu/API ani treningowego UI; ścieżki `/backend/` są
+UI to szablony Django, lokalne CSS i niewielki JavaScript, bez osobnego
+frontendu/API. Ścieżki `/backend/` są
 prywatnymi operacjami monolitu z sesją Django i CSRF. Obraz CLI pozostaje osobny.
+
+### Interfejs gracza
+
+| Strona | Ścieżka |
+|---|---|
+| Strona główna i upload | `/` |
+| Konto, weryfikacja e-mail, Steam i usunięcie konta | `/account/` |
+| Prywatna historia ze stronicowaniem | `/history/` |
+| Status zadania, raport i zapis wyboru/odrzuceń | `/uploads/<id>/` |
+| Jedna aktywna sytuacja, kopiowanie komend i ocena | `/uploads/<id>/training/` |
+| Nowe/do powtórki, nadchodzące i nietrafne | `/practice/` |
+
+Logowanie przekierowuje do historii. Formularze allauth (rejestracja,
+potwierdzenie adresu, reset hasła i wylogowanie) korzystają ze wspólnej powłoki.
+Przed weryfikacją e-mail i Steam nie wysyłamy dema. Upload wymaga potwierdzenia
+uprawnień, pokazuje rzeczywisty postęp transferu i wysyła surowy plik prosto do R2.
+UUID rezerwacji i etap transferu pozostają w pamięci sesji przeglądarki,
+oddzielnie dla SteamID. Przy ponowieniu trzeba wybrać ten sam plik; po błędzie
+potwierdzenia udanego transferu nie wysyłamy pliku drugi raz. Nie jest to retry
+parsowania. Po wygaśnięciu rezerwacji wymagany jest nowy upload.
+
+Status aktywnego zadania odświeża się co 5 sekund, maksymalnie przez 10 minut;
+po błędzie sieci odświeżanie zatrzymuje się z komunikatem i ręcznym przyciskiem.
+Nie pokazujemy pozorowanych procentów analizy. Raport rozdziela liczebność próby,
+porażki i wygrane, ograniczenia i brak kandydatów. Nie nazywamy wyniku werdyktem
+o błędzie. Nie pokazujemy niezmierzonych wyników meczu, reakcji ani mapy/radaru
+bez zweryfikowanego podkładu.
+
+Zapisz wybór przed przejściem do treningu; wybór paczki nie może być pusty.
+Główna ścieżka to skopiowanie pełnej linii jednej sytuacji. Odmowa dostępu
+do schowka daje komunikat i zaznacza tekst do ręcznego skopiowania. ZIP/CFG są
+opcjonalne. Raporty, wybór i oceny działają bez ponownego parsowania lub dostępu do R2.
+
+### Deklarowane oceny i powtórki
+
+Po ćwiczeniu można samodzielnie oznaczyć sytuację: **trudne** (powtórka za 1 dzień),
+**wykonane** (za 3 dni), **łatwe** (za 7 dni) lub **nietrafne** (bez terminu,
+poza aktywną kolejką do ręcznego przywrócenia). Terminy są liczone na serwerze
+od chwili oceny i wyświetlane w UTC. Ponowna ocena zastępuje poprzednią
+i wyznacza nowy termin; nie prowadzimy historii prób ani statystyk wygranych.
+Przywrócenie usuwa bieżącą ocenę i czyni sytuację ponownie nową.
+
+`PracticeReview` przechowuje tylko bieżącą ocenę, czas i termin na parę
+raport/scenariusz. Kolejka bierze wszystkie gotowe prywatne raporty, respektuje
+ich aktualny wybór, sortuje po terminie (nowe po dacie raportu), a następnie
+po ID raportu i scenariusza, i stronicuje wynik po 20 sytuacji. Nie ogranicza
+się do ostatnich 100 raportów. Niewybrane sytuacje zachowują oceny, ale nie są
+w kolejce. „Nietrafne” nie zmienia wyboru paczki; zmień go osobno w raporcie.
+Usunięcie raportu lub konta usuwa również oceny i terminy.
+
+**Ocena jest deklaracją, nie wynikiem z CS2.** Kopiowanie/pobranie nie oznacza
+wykonania ćwiczenia. Nie ma automatycznego uruchamiania gry, powiadomień,
+pomiaru poprawy ani potwierdzonego importu Yprac.
 
 **Polityka:** publiczna rejestracja e-mail/hasło i potwierdzenie adresu;
 przed uploadem obowiązkowe Steam OpenID. Jeden SteamID64 jest przypisany do
 jednego konta aplikacji, bez samodzielnego odpinania. Analiza dotyczy tylko tego
-gracza; jego obecność w demie jest sprawdzana. Limit to **3 przyjęte dema na
-SteamID w ruchomych 7 dniach**, z rezerwacją przy rozpoczęciu uploadu i jednym
+gracza; jego obecność w demie jest sprawdzana. Free obejmuje **3 przyjęte dema na
+SteamID w miesiącu kalendarzowym UTC**, z rezerwacją przy rozpoczęciu uploadu i jednym
 aktywnym zadaniem. 1 GiB jest wyłącznie technicznym limitem pojedynczego pliku.
+Pro kosztuje **7,99 USD miesięcznie** i usuwa limit liczby analiz tego SteamID,
+ale nie limit rozmiaru, jedno aktywne zadanie ani globalną wyłączność parsera.
+Miesiąc Free resetuje się pierwszego dnia o 00:00 UTC. Wszystkie naliczone
+analizy miesiąca, również z czasu Pro, są uwzględniane po powrocie do Free.
 Zły/nieobsługiwany plik zużywa przyjęcie, błąd infrastruktury zwalnia kwotę.
 Niedokończona rezerwacja wygasa bez naliczenia.
 
@@ -345,7 +426,7 @@ Nowy upload jest blokowany do usunięcia poprzedniego wejścia, aby awaria
 sprzątania nie pozwalała gromadzić kolejnych dem mimo zwalniania kwoty.
 Lifecycle R2 stanowi dodatkowe zabezpieczenie; nie gwarantuje usunięcia w dokładnej
 sekundzie. Po usunięciu konta minimalna ewidencja SteamID i kwoty pozostaje do końca
-7-dniowego okna, aby nowa rejestracja nie resetowała limitu. Odzyskanie powiązania
+bieżącego miesiąca UTC, aby nowa rejestracja nie resetowała limitu. Odzyskanie powiązania
 przez administratora nie może kasować tej ewidencji. Operacje usunięcia konta
 wymagają hasła i zakończenia aktywnego zadania. Usunięcia należy uwzględnić
 także w przyszłej procedurze odtwarzania backupu.
@@ -362,6 +443,11 @@ usuwa nadmiarowe pola ze starszych zapisanych profili; wdrożenie wymaga
 uruchomienia `cs-map-trainer-web migrate`. Migracja `0003_training_selection`
 dodaje zapis wyboru przy wyniku; istniejące raporty domyślnie obejmują wszystkie
 sytuacje i nie są przepisywane.
+Migracja `0004_practicereview` dodaje bieżące oceny i terminy powtórek.
+Migracja `0005_billing_accounts` dodaje konta Stripe, stan dostępu i minimalne
+potwierdzenia obsłużonych webhooków. Zmiana kwoty Free na miesiąc UTC obejmuje
+istniejącą, zachowaną ewidencję uploadów; nie zeruje bieżącego zużycia.
+Przed uruchomieniem nowego UI zastosuj wszystkie migracje.
 `DJANGO_DEBUG=1` jest wyłącznie do lokalnego HTTP; produkcja wymaga HTTPS,
 `DJANGO_DEBUG=0`, poprawnych hostów i originów.
 
@@ -389,13 +475,204 @@ i 2 CPU. Nadzorca egzekwuje RSS/czas i zabija proces przy przekroczeniu;
 Linux dodatkowo ogranicza przestrzeń adresową, CPU i rozmiar wyniku.
 Parser dziedziczy blokadę `.parser.lock` we wspólnym wolumenie roboczym:
 śmierć workera nie zwalnia slotu, dopóki sam parser nie zakończy działania.
+Proces parsera dostaje jawne `AWPY_DATA_DIR` wewnątrz katalogu danego uploadu.
+Nie wymaga `HOME` ani wpisu użytkownika w `/etc/passwd`; ewentualne dane Awpy
+są usuwane razem z katalogiem roboczym.
 Nie usuwać pliku blokady podczas pracy. Linux kończy parser sygnałem
 `SIGKILL` po śmierci rodzica, także podczas wykonania kodu natywnego;
 pozostałe systemy POSIX używają watchdogu. Odziedziczona blokada pozostaje
 ochroną wyłączności niezależnie od szybkości reakcji watchdogu i blokady PostgreSQL.
 To ochronne ustawienia startowe, **nie potwierdzony sizing VPS**. Potrzebny jest
 także zapas RAM dla weba/bazy i miejsce na jedno demo oraz osierocone wejścia.
-Compose nie jest jeszcze kompletnym wdrożeniem TLS/backup/monitoring.
+Podstawowy Compose jest wariantem lokalnym. Wariant TLS opisano poniżej;
+backup/odtworzenie i pełny monitoring pozostają osobnymi zadaniami.
+
+**Pliki statyczne:** `Dockerfile.web` zbiera CSS/JS i statyki Django podczas
+budowania do `/app/static`. Gunicorn ich nie serwuje. Produkcyjny reverse proxy
+musi obsługiwać `/static/` z tego katalogu, niezależnie od prywatnych stron:
+po uruchomieniu obrazu można skopiować gotowe pliki, np.
+`docker compose cp web:/app/static ./deploy-static`, i wskazać proxy katalog
+`deploy-static`. Po zmianie obrazu zaktualizuj również statyki.
+Bez Dockera uruchom `STATIC_ROOT=/wybrany/katalog uv run cs-map-trainer-web collectstatic --noinput`
+i skieruj tam proxy. Nie używaj `runserver --insecure` w produkcji.
+Lokalny `runserver` z `DJANGO_DEBUG=1` serwuje statyki aplikacji samodzielnie.
+
+### Lokalne testy UI bez usług zewnętrznych
+
+`compose.ui.yml` jest wyłącznie lokalnym rozszerzeniem do testów interfejsu.
+Wymaga `.env` z losowymi `DJANGO_SECRET_KEY` i `PGPASSWORD` oraz opcjonalnymi
+`PGDATABASE`/`PGUSER` (domyślnie `trainer`). Plik trzymaj poza Git, z uprawnieniami
+`0600`. Nie łącz tego wariantu z konfiguracją produkcyjną.
+
+```sh
+docker compose -p cs-map-trainer-ui -f compose.yml -f compose.ui.yml build web
+docker compose -p cs-map-trainer-ui -f compose.yml -f compose.ui.yml up -d db mail
+docker compose -p cs-map-trainer-ui -f compose.yml -f compose.ui.yml run --rm web \
+  cs-map-trainer-web migrate --noinput
+docker compose -p cs-map-trainer-ui -f compose.yml -f compose.ui.yml up -d web
+```
+
+Aplikacja: `http://localhost:8000`, lokalna skrzynka MailHog:
+`http://localhost:8025`. Poczta nie jest wysyłana do internetu. Przeglądarka
+Playwright MCP w Docker Desktop na macOS może wejść przez
+`http://host.docker.internal:8000`; `localhost` w jej kontenerze oznacza sam
+kontener, nie hosta. Przy korzystaniu z linków w wiadomościach używaj tego
+samego hosta co podczas rejestracji/logowania.
+
+Wariant wymusza debug i lokalny serwer Django ze statykami, zeruje konfigurację
+R2/Steam/Stripe i nie wymaga Node.js na hoście. Uruchamiaj tylko wskazane usługi
+`db mail web`: worker i reaper z bazowego Compose nie są częścią tej próby.
+Można sprawdzić rejestrację, potwierdzanie adresu, reset hasła i nawigację.
+Nie jest to pełne E2E: bez Steam/R2 nie ma rzeczywistego uploadu i analizy,
+a raporty, trening i abonament wymagają osobnych danych/usług testowych.
+Nie używaj prawdziwych danych ani haseł produkcyjnych.
+
+Zatrzymanie bez usuwania bazy:
+
+```sh
+docker compose -p cs-map-trainer-ui -f compose.yml -f compose.ui.yml stop
+```
+
+`compose.upload-test.yml` jest dodatkowym, lokalnym rozszerzeniem do prób
+backendu z emulatorem S3 Moto zamiast R2. Używa projektu
+`cs-map-trainer-ui` i obrazu weba zbudowanego powyżej także dla workera/reapera.
+Dodaj je jako trzeci plik `-f` i uruchom `storage`, `web`, `worker`,
+`maintenance`. Przed pierwszym uploadem utwórz testowy bucket
+`local-demo-inputs` przez API S3 emulatora i przygotuj testowe konto/tożsamość.
+Endpoint `http://storage:5000` jest dostępny wyłącznie w sieci Compose;
+klient wykonujący podpisany PUT musi działać w tej samej sieci. Nie jest to
+wariant do uploadu z przeglądarki hosta. Storage jest nietrwały i nie publikuje
+portów. Moto nie potwierdza zabezpieczeń podpisów/CORS ani kontraktu prawdziwego R2.
+
+### Wdrożenie z Caddy (Linux/VPS)
+
+`compose.production.yml` rozszerza bazowy Compose o Caddy z automatycznym TLS.
+Wymaga Docker Compose **2.24.4 lub nowszego** (obsługa `!reset`), docelowego
+hosta Linux z zapasem zasobów opisanym wyżej i pojedynczej domeny wskazującej
+DNS A/AAAA na serwer. Nie publikuj AAAA bez działającej łączności IPv6.
+Udostępnij TCP 80/443 do Caddy; porty Gunicorna i PostgreSQL nie są publikowane.
+Nie stawiaj dodatkowego proxy/CDN przed Caddy bez osobnego odbioru zaufania
+do nagłówków i wydawania certyfikatów.
+
+Przygotuj `.env` poza Git (uprawnienia `0600`, dostęp tylko administratora).
+Oprócz danych bazy/R2/Steam/SMTP i **testowych** danych Stripe ustaw:
+
+```dotenv
+DJANGO_DEBUG=0
+DJANGO_TRUST_PROXY=0
+CADDY_DOMAIN=trainer.example.com
+ACME_EMAIL=ops@example.com
+DJANGO_ALLOWED_HOSTS=trainer.example.com
+CSRF_TRUSTED_ORIGINS=https://trainer.example.com
+PUBLIC_BASE_URL=https://trainer.example.com
+```
+
+Wpisz prawdziwą domenę i adres kontaktowy zamiast przykładów. `CADDY_DOMAIN`
+to sam hostname, bez protokołu, portu, ścieżki, wildcarda ani listy domen.
+Użyj losowego, silnego `DJANGO_SECRET_KEY` oraz hasła PostgreSQL.
+Rozszerzenie produkcyjne wymusza `DEBUG=0`, host/origin i adres publiczny
+na podstawie `CADDY_DOMAIN`. Włącza `DJANGO_TRUST_PROXY=1` **tylko dla weba**.
+Po włączeniu tej opcji Django ufa `X-Forwarded-Proto`; nie wolno wystawiać
+Gunicorna bezpośrednio. Caddy domyślnie zastępuje niezaufane nagłówki
+`X-Forwarded-*` klienta, a konfiguracja nie dodaje zaufanych proxy.
+Cookies pozostają secure, a HTTP przekierowuje do HTTPS.
+
+Poniższe polecenia wykonuj z katalogu projektu. Zachowuj tę samą nazwę
+projektu Compose i zestaw plików podczas każdej operacji:
+
+```sh
+docker compose -f compose.yml -f compose.production.yml config --quiet
+docker compose -f compose.yml -f compose.production.yml build
+docker compose -f compose.yml -f compose.production.yml up -d db
+docker compose -f compose.yml -f compose.production.yml run --rm web \
+  cs-map-trainer-web migrate --noinput
+docker compose -f compose.yml -f compose.production.yml run --rm web \
+  cs-map-trainer-web check --deploy
+docker compose -f compose.yml -f compose.production.yml run --rm --no-deps proxy \
+  caddy validate --config /etc/caddy/Caddyfile --adapter caddyfile
+docker compose -f compose.yml -f compose.production.yml up -d web worker maintenance proxy
+docker compose -f compose.yml -f compose.production.yml ps
+curl --fail --head https://trainer.example.com/accounts/login/
+curl --fail --head https://trainer.example.com/static/trainer/app.css
+```
+
+Kontrola `check --deploy` pozostawia jawne ostrzeżenia `security.W005` i
+`security.W021`: nie włączamy automatycznie HSTS dla wszystkich subdomen
+ani preload bez sprawdzenia całej domeny. HSTS dla bieżącego hosta jest
+włączone. Inne ostrzeżenia/błędy wymagają wyjaśnienia przed udostępnieniem.
+Nie używaj `curl -k` do odbioru publicznego TLS. Sprawdź również HTTP → HTTPS,
+logowanie i CSRF, brak pętli przekierowań, CSS/JS oraz działanie po restarcie.
+Samo `ps` nie potwierdza gotowości aplikacji ani działania parsera.
+
+`Dockerfile.web` ma targety `web` i `proxy`. Oba otrzymują statyki z tego samego
+etapu `collectstatic`; Caddy serwuje tylko publiczny `/static/` z obrazu,
+bez katalogu wejść, raportów i listowania plików. Nie ma wolumenu statyków,
+który zachowałby stare CSS/JS po przebudowaniu. Buduj i wdrażaj wszystkie
+obrazy z tej samej wersji kodu. Wolumeny `database`, `scratch`, `caddy-data`
+i `caddy-config` muszą przetrwać restart i aktualizację. Caddy przechowuje
+w nich m.in. prywatne klucze certyfikatów; ogranicz dostęp do hosta/Dockera.
+Worker i reaper używają UID/GID `10001:10001`; nowy wolumen `scratch`
+otrzymuje właściciela z obrazu. Przy przeniesieniu wolumenu zweryfikuj
+możliwość zapisu przez ten UID, nie stosuj `chmod 777`.
+Nie usuwaj `.parser.lock` ani wolumenów podczas pracy.
+
+Przed aktualizacją zabezpiecz bazę zgodnie z osobno odebraną procedurą backupu.
+Zatrzymaj przyjmowanie ruchu i usługi używające bazy, zastosuj migracje,
+potem uruchom nowe obrazy:
+
+```sh
+docker compose -f compose.yml -f compose.production.yml build
+docker compose -f compose.yml -f compose.production.yml stop proxy web worker maintenance
+docker compose -f compose.yml -f compose.production.yml run --rm web \
+  cs-map-trainer-web migrate --noinput
+docker compose -f compose.yml -f compose.production.yml run --rm web \
+  cs-map-trainer-web check --deploy
+docker compose -f compose.yml -f compose.production.yml up -d web worker maintenance proxy
+```
+
+To aktualizacja z przerwą, nie rolling deploy. Zatrzymanie workera może przerwać
+analizę; wybierz okno bez aktywnego zadania, nie uruchamiaj automatycznie parsera
+ponownie. Nie wykonuj `down --volumes` na wdrożeniu. Nie cofaj samego obrazu
+po nieodwracalnej migracji bez sprawdzenia zgodności schematu.
+Ponów odbiór HTTP/statyków, sprawdź logi i działanie reapera.
+Polityka `unless-stopped` obejmuje wszystkie usługi produkcyjne;
+po ręcznym `stop` należy ponownie wykonać `up -d`.
+
+#### Okresowe uzgadnianie Stripe
+
+Szablony `deploy/cs-map-trainer-billing.service` i `.timer` uruchamiają
+`reconcile_subscriptions` co 15 minut niezależnie od workera i reapera.
+Dotyczą systemd na docelowym VPS, **nie aktywuj ich na komputerze lokalnym**.
+Przed instalacją popraw `WorkingDirectory=/opt/cs-map-trainer` i ścieżkę
+`/usr/bin/docker`, jeżeli instalacja używa innych lokalizacji.
+Użyj tego samego projektu Compose co przy wdrożeniu; jeśli ustawiono `-p`
+lub `--env-file`, dodaj te same argumenty do `ExecStart`.
+
+```sh
+sudo install -m 0644 deploy/cs-map-trainer-billing.service \
+  deploy/cs-map-trainer-billing.timer /etc/systemd/system/
+sudo systemctl daemon-reload
+sudo systemctl enable --now cs-map-trainer-billing.timer
+sudo systemctl start cs-map-trainer-billing.service
+sudo systemctl status cs-map-trainer-billing.service
+sudo systemctl list-timers cs-map-trainer-billing.timer
+sudo journalctl -u cs-map-trainer-billing.service --since today --no-pager
+```
+
+Niezerowy wynik polecenia lub timeout pozostawia usługę w stanie błędu
+i zapis w journalu; timer ponawia kolejną próbę, nie uruchamia równoległych
+instancji tej samej usługi. Przy błędzie sprawdź dostępność weba/bazy/Stripe,
+konfigurację test/live i kody błędów, usuń przyczynę, uruchom usługę ręcznie
+i sprawdź wynik. Limit pojedynczego uruchomienia to 10 minut; przy rosnącej
+liczbie kont zweryfikuj czas wykonania. Nie wklejaj do logów sekretów,
+payloadów webhooków ani wyników `compose config` zawierających środowisko.
+Automatyczne alarmowanie o błędzie timera pozostaje częścią zadania monitoringu.
+Przed planowaną aktualizacją zatrzymaj timer i poczekaj na zakończenie
+aktywnej usługi; po odbiorze ponownie włącz timer.
+
+Ten wariant wymaga jeszcze odbioru na docelowym VPS: prawdziwego certyfikatu
+ACME, usług R2/Steam/SMTP/Stripe, awarii workera, backupu i monitoringu.
+Lokalny certyfikat testowy nie potwierdza publicznego wdrożenia.
 
 Bez Dockera: wyeksportuj zmienne środowiska (Django nie wczytuje automatycznie
 `.env`), uruchom `uv run cs-map-trainer-web migrate`, a następnie w osobnych
@@ -403,7 +680,7 @@ procesach `runserver`, `qcluster` oraz `maintain_uploads --loop`.
 R2, SMTP i PostgreSQL są nadal wymagane. Worker wymaga systemu POSIX;
 produkcyjna izolacja i twardy limit kontenera dotyczą wariantu Linux/Docker.
 
-### Operacje do podłączenia UI
+### Operacje używane przez UI
 
 | Operacja | Ścieżka / dane |
 |---|---|
@@ -424,9 +701,17 @@ W żądaniach modyfikujących dane wysyłaj cookie sesji i `X-CSRFToken`.
 `request_id` jest kluczem idempotencji dla jednego SteamID; ponowienie z innym
 rozmiarem jest błędem. SteamID przesłany przez klienta nie wybiera gracza.
 Upload do R2 nie wymaga cookie sesji, tylko podpisanego URL. Błędy mają jawne
-kody, m.in. `weekly_demo_limit`, `unsupported_or_invalid_demo`, `worker_lost`,
+kody, m.in. `monthly_demo_limit`, `unsupported_or_invalid_demo`, `worker_lost`,
 `linked_player_not_in_demo`, `processing_failed`; stan sprzątania jest
 oddzielony od wyniku analizy.
+Nawigacja przeglądarki z `Accept: text/html` otrzymuje czytelną stronę błędu;
+żądania JSON zachowują kody błędów. Brak konfiguracji R2 daje jawne 503.
+
+Formularze UI zapisują wybór przez `POST /uploads/<id>/selection/`, a oceny przez
+`POST /uploads/<id>/scenarios/<scenario_id>/review/` (`rating`: `done`, `easy`,
+`hard`, `irrelevant` lub `restore`). Wymagają sesji, potwierdzonego e-maila i CSRF.
+Kandydaci i własność wynikają z raportu, nie z payloadu klienta.
+Nie zmieniamy stanu przez GET.
 
 ### Wybór sytuacji i eksport z zapisanego raportu
 
@@ -499,15 +784,92 @@ CS_MAP_TRAINER_R2_CONTRACT=1 uv run pytest tests/integration/test_r2_contract.py
 Próba sprawdza odrzucenie innego rozmiaru, poprawny upload, zakończenie, odczyt,
 unieważnienie URL i usunięcie. Bez tych prób nie oznaczamy integracji jako
 potwierdzonej. Selekcja i autoryzowane eksporty backendu są zaimplementowane,
-ale treningowe UI pozostaje kolejnym etapem. Pakiet trenera/akademii
-z analizą innych zawodników wymaga osobnego uprawnienia
-i polityki kwot, nie jest teraz dostępnym obejściem SteamID.
+tak samo jak treningowe UI, deklarowane oceny użytkownika i powtórki.
+Pakiet trenera/akademii i analiza innych zawodników są poza zakresem.
+
+### Stripe Billing — abonament za serwis
+
+Zaimplementowano **7,99 USD/miesiąc, bez limitu liczby analiz własnego,
+powiązanego SteamID**. Free obejmuje 3 analizy na miesiąc kalendarzowy UTC.
+Nie ma opłat za pojedyncze demo, okresu próbnego ani automatycznego zwrotu.
+Portal i checkout są hostowane przez Stripe; aplikacja nie przechowuje kart.
+
+Zakup, portal zarządzania i odświeżenie stanu są na `/account/`.
+Wymagają zweryfikowanego e-maila, powiązanego Steam, sesji oraz POST z CSRF.
+Cena i identyfikator klienta wynikają z konfiguracji serwera, nie z formularza.
+Otwarty checkout jest ponownie używany; klucze idempotencji i blokada SteamID
+chronią przed podwójnym utworzeniem sesji przy ponowieniu lub współbieżności.
+Powrót `/account/billing/return/` **nie nadaje Pro**.
+
+Pro wynika z opłaconego okresu pozycji faktury właściwej ceny i bieżącego stanu
+subskrypcji pobranego z API Stripe. `invoice.paid` nie jest ślepo kopiowane
+z payloadu webhooka. Starsze zdarzenie nie może przywrócić anulowanej subskrypcji.
+Podpisy webhooków mają tolerancję 300 sekund; ID obsłużonych zdarzeń są unikalne.
+Nieudane uzgodnienie zwraca 503 i nie zapisuje potwierdzenia, aby Stripe mógł ponowić.
+
+Anulowanie przez portal działa **na koniec opłaconego okresu**. Nieudane odnowienie
+nie przedłuża dostępu ani nie daje okresu tolerancji; po opłaconym terminie
+wraca kwota Free. Rozpoczęte zadania nie są przerywane. Przed usunięciem konta
+aplikacja wygasza otwarte checkouty i natychmiast anuluje subskrypcje, bez
+proraty/automatycznego zwrotu. Awaria Stripe blokuje usunięcie, zamiast pozostawiać
+czynny abonament bez konta. Dotyczy to także usunięcia użytkownika przez ORM/admin.
+
+Po usunięciu konta pozostaje zamknięta referencja klienta Stripe bez właściciela
+i bez dostępu Pro, służąca do anulowania ewentualnych opóźnionych subskrypcji.
+Przechowujemy ID klienta/sesji/subskrypcji, stan, terminy i ID zdarzeń, nie pełne
+payloady ani dane kart. Dane rozliczeniowe u Stripe podlegają zasadom operatora.
+Ręczny zwrot w panelu Stripe sam w sobie nie jest anulowaniem subskrypcji;
+odebranie dostępu wymaga jej anulowania. Aplikacja nie wykonuje refundacji.
+
+#### Konfiguracja Stripe
+
+1. W trybie testowym Stripe utwórz stałą cenę **799 centów USD**, cyklicznie
+   co miesiąc (interval `month`, interval count `1`, licensed). Bez triala
+   i kodów promocyjnych. Ustaw `STRIPE_PRICE_ID`; aplikacja weryfikuje parametry
+   ceny zamiast przyjmować inną kwotę lub walutę.
+2. Utwórz konfigurację Billing Portal: anulowanie włączone, tryb
+   **at period end**; zmiany planu/ceny wyłączone. Włącz zarządzanie metodą
+   płatności i historię faktur. Ustaw `STRIPE_PORTAL_CONFIGURATION_ID`.
+3. Ustaw `STRIPE_SECRET_KEY` oraz stałe `PUBLIC_BASE_URL`, np. właściwą domenę
+   HTTPS bez ścieżki. HTTP jest dopuszczone tylko przy lokalnym `DEBUG=1`.
+   Adresów powrotu nie wyprowadzamy z nagłówka Host przeglądarki.
+4. Skonfiguruj endpoint **`POST /billing/stripe/webhook/`** i jego sekret
+   `STRIPE_WEBHOOK_SECRET`. API odczytu jest przypięte do `2025-06-30.basil`.
+   Wybierz zdarzenia `checkout.session.completed`,
+   `checkout.session.async_payment_succeeded`, `checkout.session.async_payment_failed`,
+   `customer.subscription.created`, `customer.subscription.updated`,
+   `customer.subscription.deleted`, `invoice.paid`, `invoice.payment_failed`,
+   `invoice.voided`, `invoice.marked_uncollectible`.
+5. Zastosuj migracje i przejdź w trybie testowym zakup, webhook, odnowienie,
+   nieudaną płatność, anulowanie, wygaśnięcie oraz usunięcie konta.
+   Dopiero po odbiorze skonfiguruj odpowiednie klucze/cenę/portal/webhook w live.
+   Nie mieszaj identyfikatorów między środowiskami i nie zapisuj sekretów w Git.
+
+Przy lokalnym odbiorze można przekazać webhooki przez Stripe CLI:
+`stripe listen --forward-to http://localhost:8000/billing/stripe/webhook/`.
+Sekret tego listenera ustaw lokalnie jako `STRIPE_WEBHOOK_SECRET`.
+
+Po utracie/opóźnieniu webhooków użytkownik może użyć przycisku odświeżenia.
+Niezależnie uruchamiaj okresowo (np. co 15 minut) oraz po awarii:
+
+```sh
+uv run cs-map-trainer-web reconcile_subscriptions
+```
+
+Polecenie uzgadnia również zamknięte referencje po usunięciu konta, by anulować
+opóźnione subskrypcje. Błąd daje niezerowy kod wyjścia i wymaga reakcji/ponowienia.
+Nie jest to retry parsowania. Operacyjne uruchamianie i monitoring tego polecenia
+trzeba skonfigurować we wdrożeniu; nie blokuje ono sprzątania dem w reaperze.
+
+Automatyczne testy korzystają z atrap Stripe. Rzeczywista sesja Checkout,
+dostarczenie webhooków i pobranie opłaty wymagają powyższej konfiguracji;
+nie zostały potwierdzone prawdziwymi poświadczeniami w tej sesji.
 
 ## Kolejne bramki
 
 Procedurę testu integracji opisuje [protokół G1](docs/integration-validation.md).
 Do końcowego odbioru trzeba zweryfikować interfejs Yprac Hub/Sandbox,
-wymagania klienta i konkretną mapę Mirage. Udokumentowane `place`, `savepos`, `loadpos`
+wymagania klienta i konkretne rewizje map Mirage oraz Dust2. Udokumentowane `place`, `savepos`, `loadpos`
 i `swap` pomagają w ustawianiu sytuacji, ale nie potwierdzają importu dowolnych
 XYZ i kątów z dema. Hub nie jest sam w sobie dowodem zgodności mapy.
 
@@ -515,8 +877,9 @@ Aktualna kolejność: **backend z eksporterem i paczkami → UI → końcowe pr�
 w CS2/Yprac**. Poprawność komend przyjmujemy na potrzeby implementacji;
 G1 nie blokuje BE/UI, ale pozostaje wymagane przed deklarowaniem
 zweryfikowanego treningu. Testy kodu i aplikacji są wykonywane na bieżąco.
-Płatny pilot i decyzja o skalowaniu następują po końcowym odbiorze.
-Równolegle pozostają ręczne referencje, ocena trenera i benchmark VPS.
+Pozostają konfiguracja i odbiór prawdziwego Stripe, wdrożenie i techniczny benchmark VPS.
+Nie ma etapu oceny przez trenera, pilota biznesowego ani walidacji SaaS.
+Deklarowane oceny użytkownika i kolejka powtórek pozostają.
 **Aktualne zadania, statusy i instrukcję rozpoczęcia
 następnego wątku zawiera [plan projektu](docs/project-plan.md).**
 

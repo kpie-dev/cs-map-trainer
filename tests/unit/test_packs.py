@@ -8,7 +8,8 @@ from pydantic import ValidationError
 
 from cs_map_trainer.artifacts import write_new_file
 from cs_map_trainer.exporting import ASSUMPTIONS, ExportError, export_scenario
-from cs_map_trainer.packs import build_pack, load_scenarios, select_scenarios
+from cs_map_trainer.maps import SUPPORTED_MAPS
+from cs_map_trainer.packs import PackManifest, build_pack, load_scenarios, select_scenarios
 from cs_map_trainer.scenarios import ScenarioDocument
 
 
@@ -55,6 +56,7 @@ def test_archive_manifest_and_commands(document, include_cfg):
     assert pack.archive == build_pack(document, reject=["duel-2"], include_cfg=include_cfg).archive
     manifest = pack.manifest
     assert manifest.compatibility == "unverified_in_game"
+    assert manifest.integration == SUPPORTED_MAPS[document.scenarios[0].map.name].integration
     assert manifest.workshop_id == "3070715607"
     assert manifest.assumed_bot_player_index == manifest.assumed_bot_entity_index == 2
     assert manifest.assumptions == list(ASSUMPTIONS)
@@ -85,9 +87,36 @@ def test_archive_manifest_and_commands(document, include_cfg):
             if entry.cfg_file:
                 assert archive.read(entry.cfg_file).decode() == exported.cfg
         instructions = archive.read("README.txt").decode()
-        assert "niezweryfikowane" in instructions
-        assert "DWA ODRĘBNE ZAŁOŻENIA" in instructions
-        assert "Średniki nie czekają" in instructions
+        assert document.scenarios[0].map.name in instructions
+        assert "not verified in game" in instructions
+        assert "TWO SEPARATE ASSUMPTIONS" in instructions
+        assert "Semicolons do not wait" in instructions
+
+
+def test_mixed_map_pack_identifies_each_file(document):
+    document.scenarios[0].map.name = "de_mirage"
+    document.scenarios[1].map.name = "de_dust2"
+    pack = build_pack(document, include=["duel-1", "duel-2"], include_cfg=True)
+    assert pack.manifest.integration == "yprac_hub_multi_map_sandbox"
+    with ZipFile(BytesIO(pack.archive)) as archive:
+        instructions = archive.read("README.txt").decode()
+    assert "console/scenario-0001.txt / cfg/scenario-0001.cfg: Mirage (de_mirage)" in instructions
+    assert "console/scenario-0002.txt / cfg/scenario-0002.cfg: Dust2 (de_dust2)" in instructions
+    assert "switch to that map in Sandbox" in instructions
+    assert (
+        build_pack(document, include=["duel-2"]).manifest.integration == "yprac_hub_dust2_sandbox"
+    )
+
+
+def test_legacy_mirage_manifest_remains_readable(document):
+    for scenario in document.scenarios:
+        scenario.map.name = "de_mirage"
+    legacy = build_pack(document).manifest.model_dump(mode="json")
+    legacy["assumptions"] = ["mirage_geometry_and_client_access_unverified"]
+    assert (
+        PackManifest.model_validate_json(json.dumps(legacy)).integration
+        == "yprac_hub_mirage_sandbox"
+    )
 
 
 def test_manifest_distinguishes_omitted_from_rejected(document):

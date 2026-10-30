@@ -1,5 +1,6 @@
 import pytest
 
+from cs_map_trainer.maps import SUPPORTED_MAPS
 from cs_map_trainer.parsing import DemoError, DemoReader
 
 
@@ -41,3 +42,23 @@ def test_size_limit_is_enforced_before_decoding(tmp_path, monkeypatch):
     monkeypatch.setattr("cs_map_trainer.parsing.MAX_DEMO_BYTES", 1)
     with pytest.raises(DemoError, match="limit"):
         DemoReader(path)
+
+
+@pytest.mark.parametrize("map_name", [*SUPPORTED_MAPS, "de_inferno", "de_nuke", "de_unknown"])
+def test_map_support_comes_from_demo_header(tmp_path, monkeypatch, map_name):
+    from types import SimpleNamespace
+
+    path = tmp_path / "misleading-dust2-name.dem"
+    path.write_bytes(b"PBDEMS2\x00")
+    monkeypatch.setattr(
+        "cs_map_trainer.parsing.Demo",
+        lambda path: SimpleNamespace(header={"map_name": map_name, "build_num": 123}),
+    )
+    if map_name in SUPPORTED_MAPS:
+        reader = DemoReader(path)
+        assert reader.map.name == map_name
+        assert reader.map.game_build == 123
+        assert reader.map.revision == "unverified-demo-build-123"
+    else:
+        with pytest.raises(DemoError, match="de_mirage, de_dust2"):
+            DemoReader(path)

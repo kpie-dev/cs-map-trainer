@@ -7,6 +7,7 @@ from pathlib import Path
 
 from pydantic import TypeAdapter, ValidationError
 
+from cs_map_trainer.maps import SUPPORTED_MAP_NAMES
 from cs_map_trainer.scenarios import ScenarioDocument, SteamID
 
 
@@ -121,7 +122,8 @@ def _training_command(args: argparse.Namespace) -> int:
         f"Experimental export: {COMPATIBILITY}. Assumed bot player index {BOT_PLAYER_INDEX} "
         f"AND pawn entity index {BOT_ENTITY_INDEX}; eyes, spawn, ordering, weapons "
         "and map geometry are unverified. "
-        "Isolated local Yprac Mirage/Sandbox only; existing bots and session settings "
+        "Isolated local Yprac session on the scenario's map in Sandbox only; "
+        "existing bots and session settings "
         "will be changed. See the pack manifest and instructions.",
         file=sys.stderr,
     )
@@ -137,7 +139,9 @@ def main(argv: list[str] | None = None) -> int:
     validate = commands.add_parser("validate-scenarios", help="Validate a scenario JSON document")
     validate.add_argument("path", type=Path)
     commands.add_parser("schema", help="Print JSON Schema for the supported scenario version")
-    players = commands.add_parser("players", help="Read the roster of a CS2 .dem (de_mirage)")
+    players = commands.add_parser(
+        "players", help=f"Read the roster of a CS2 .dem ({SUPPORTED_MAP_NAMES})"
+    )
     players.add_argument("path", type=Path)
     players.add_argument("--output", type=Path, help="Write JSON to a new file instead of stdout")
     for name, help_text in (

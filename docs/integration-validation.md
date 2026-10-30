@@ -8,7 +8,74 @@ jedno wklejenie do konsoli; plik CFG jest opcjonalny. Nie zaliczamy ręcznego
 ustawiania botów. Ten cel zastępuje wcześniejszą próbę
 integracji wyłącznie ze zwykłą lokalną sesją CS2.
 
-Wymagane jest samodzielne rozpoznanie bota, ustawienie XYZ i kierunku patrzenia
+## Rozszerzenie zakresu: odbiór siedmiu map
+
+Plan obejmuje **Cache, Dust2, Mirage, Inferno, Nuke, Ancient i Anubis**
+(`de_cache`, `de_dust2`, `de_mirage`, `de_inferno`, `de_nuke`, `de_ancient`,
+`de_anubis`). Obecny parser i eksperymentalny eksporter obsługują Mirage i Dust2;
+pozostałe pięć map wymaga implementacji. Poniższe ustalenia i przykłady Mirage są dotychczasową
+bazą rozpoznania, nie dowodem wsparcia pozostałych map.
+
+Dla każdej mapy osobno potwierdzić dostępność CS2/Sandbox w Yprac Hub,
+rzeczywistą rewizję i zgodność geometrii ze źródłowym demem. Przeprowadzić
+opisaną poniżej próbę jednej, następnie 10 sytuacji oraz pomiary obu stron
+przed i po powtórzeniu. Uwzględnić różne wysokości i nakładające się poziomy,
+zwłaszcza na Nuke. Nie stosować współrzędnych ani wyników Mirage jako referencji
+innej mapy.
+
+Prowadzić macierz dowodów i status `pass`/`fail`/`blocked` osobno dla siedmiu map.
+Brak uprawnionego dema blokuje odbiór parsera danej mapy; brak zgodnej mapy
+w Yprac lub metody pomiaru blokuje jej odbiór w grze. Nie jest to powód do
+blokowania wcześniejszej implementacji BE/UI. Nie podmieniać celu eksportu
+na Mirage ani inną integrację i nie nadawać globalnego potwierdzenia po
+zaliczeniu tylko jednej mapy. G1/G4 rozszerzonego zakresu wymagają odbioru
+wszystkich siedmiu map.
+
+### Etap Dust2 — osobny odbiór
+
+CLI i aplikacja obsługują `de_dust2` przez ten sam pipeline co Mirage.
+Raport v2, scenariusze v1 i reguły `damage-window-v3` nie zmieniły się.
+Komendy, CFG i ZIP zachowują `unverified_in_game`; manifest Dust2 wskazuje
+`yprac_hub_dust2_sandbox`, a mieszany `yprac_hub_multi_map_sandbox`.
+Instrukcje przypisują mapę do każdego pliku; przed sytuacją z innej mapy
+trzeba zmienić sesję. Obsługa nie potwierdza dostępności Dust2/Sandbox w Hub.
+
+Odbiór aplikacyjny: uprawnione demo Dust2, odczyt mapy/builda z nagłówka,
+skład i analiza, porównanie XYZ/kątów z migawkami oraz eksport bez ponownego
+parsowania. Osobno sprawdzić prywatny upload/worker, wybór, CFG/ZIP,
+etykiety historii/raportu/treningu/powtórek i deklarowane oceny.
+Testy z atrapami nie zastępują próby rzeczywistych usług R2/Steam.
+
+Odbiór w grze: ustalić rzeczywistą mapę i rewizję Dust2 w Yprac, dostęp
+do Sandbox, zgodność punktów referencyjnych, indeksy i gotowość bota,
+XYZ/kąty oczu, strony i broń obu uczestników. Przeprowadzić próbę jednej,
+następnie 10 sytuacji oraz powtórzenie z pomiarami. Status Dust2 pozostaje
+niezweryfikowany do wykonania tej procedury; wyniki Mirage nie wystarczą.
+
+Wykonano lokalnie: **875 testów zaliczonych, 2 opt-in pominięte** w regresji
+na osobnym PostgreSQL; osobno zaliczono opt-in rzeczywistego dema Dust2.
+Potwierdzono nagłówek `de_dust2` / build `10924`, zgodność XYZ/kątów,
+generowanie paczki i odczyt raportu rzeczywistego procesu potomnego workera.
+Usunięto wykryty błąd walidacji komórek grup po serializacji JSON; nadal
+odrzucane są np. ciągi znaków zamiast liczb. Lint, format, sdist/wheel,
+Django checks i brak nowych migracji potwierdzone. Nie wykonano próby
+komend Dust2 w grze ani rzeczywistych usług R2/Steam.
+
+Sprawdzono także UI w Playwright na przebudowanym lokalnym obrazie Compose,
+z osobnym syntetycznym kontem i raportami Dust2/Mirage. Dla szerokości
+1280 i 390 px: strona główna, historia, oba raporty i treningi, kolejka
+nadchodzących powtórek oraz raport oczekujący zwracają HTTP 200, pokazują
+właściwe etykiety i nie powodują poziomego przewijania całej strony.
+Potwierdzono przejście między sytuacjami, zapis/odrzucenie wyboru po odświeżeniu,
+rzeczywiste pobrania CFG/ZIP, zgodność komend z API, mapę i wybór w manifeście,
+instrukcję Dust2 oraz zapis oceny „Trudne” w nadchodzących powtórkach.
+Nie stwierdzono wyjątków JavaScript. Na lokalnym HTTP `host.docker.internal`
+schowek jest niedostępny; przycisk poprawnie zaznacza tekst i podaje instrukcję
+ręcznego kopiowania. Przeglądarka zgłasza też ograniczenie COOP dla tego
+niezaufanego originu. Test nie obejmuje uploadu dema z przeglądarki do R2,
+integracji Steam ani wykonania komend w grze.
+
+Wymagane jest samodzielne rozpoznanie[inwestycje-ai-68d30f13-b195-4b7c-810f-454e34e6e15f.json](../../../Downloads/inwestycje-ai-68d30f13-b195-4b7c-810f-454e34e6e15f.json) bota, ustawienie XYZ i kierunku patrzenia
 obu uczestników oraz ponowienie. Użytkownik nie ma podawać indeksu bota.
 Kod dostarcza parser, analizę i prototyp eksportera/paczek Yprac; wygenerowanie
 komend nie potwierdza tej ścieżki ani działania importu.
@@ -30,7 +97,9 @@ sprawdza podpisany rozmiar, ukończenie, unieważnienie URL i usunięcie.
 Nie wykonywano tutaj próby z rzeczywistymi poświadczeniami ani uruchomienia Compose.
 
 Analiza dotyczy tylko SteamID potwierdzonego przez właściciela konta, z limitem
-3 przyjętych dem w ruchomych 7 dniach. Techniczny limit pliku to 1 GiB.
+3 przyjętych dem w miesiącu kalendarzowym UTC w Free. Pro kosztuje 7,99 USD/mies.
+i nie ogranicza liczby analiz własnego SteamID. Techniczny limit pliku to 1 GiB,
+a jedno aktywne zadanie na SteamID i globalna wyłączność parsera pozostają.
 Po pierwszej próbie usuwane są obie kopie dema, również po błędzie; brak
 automatycznego retry analizy. Sprawdzić usuwanie po awarii/timeout i ponawianie
 nieudanego sprzątania niezależnie od workera. Porzucone wejścia wygasają po 24 h.
@@ -52,11 +121,122 @@ pełna regresja: 421 zaliczonych, 2 pominięte (lokalne demo i prawdziwe R2).
 Lint/format, build, Django checks, zastosowanie migracji
 `0003_training_selection` i zgodność modeli z migracjami przeszły.
 To próba bazy PostgreSQL w Dockerze, nie odbiór obrazu workera Linux/Compose.
-Treningowe UI nie jest zaimplementowane. Kod backendu treningowego jest gotowy;
-G2 nadal wymaga odbioru usług zewnętrznych, G3 i G1 pozostają otwarte.
+Następnie zaimplementowano UI Tactical HUD i deklarowane powtórki opisane poniżej.
+G2 nadal wymaga odbioru usług zewnętrznych; G3 odebrano lokalnie na danych
+syntetycznych, ale odbiór w docelowym środowisku i G1 pozostają otwarte.
 Eksport nadal ma `unverified_in_game`.
 
+## Lokalny odbiór UI i deklarowanych powtórek
+
+Szablony Django obejmują konto/Steam, upload R2, historię/status, raport,
+zapamiętany wybór i kopiowanie pełnej linii jednej sytuacji. ZIP/CFG pozostają
+opcjonalne. Nie przeniesiono fikcyjnych wyników i funkcji makiet z `design/`.
+
+Model `PracticeReview` (migracja `0004_practicereview`) zapisuje ostatnią
+deklarację użytkownika i termin: trudne +1 dzień, wykonane +3 dni, łatwe +7 dni.
+Nietrafne wyłącza z powtórek do przywrócenia, bez zmieniania wyboru paczki.
+Nowe/do powtórki, nadchodzące i nietrafne są osobnymi filtrami prywatnej kolejki.
+Wybór jest respektowany we wszystkich gotowych raportach, nie tylko ostatnich 100.
+Usunięcie raportu/konta usuwa też oceny, również przy równoległym zapisie.
+Pobranie ani skopiowanie komend nie zapisuje wykonania.
+
+Testy PostgreSQL obejmują terminy kontrolowanym zegarem, przywrócenie,
+uprawnienia, CSRF, błędy, brak cache, nieprawidłowy raport, usuwanie i współbieżność.
+Próba przeglądarkowa Chromium na lokalnym serwerze i syntetycznym raporcie
+obejmuje allauth, zapis wyboru, zgodność pola komend z eksporterem, schowek
+i odmowę dostępu, oceny/przywrócenie oraz brak przepełnienia na ekranie 390 px.
+Atrapy transportu potwierdzają surowy PUT do R2 bez cookies, zachowanie UUID
+przy błędzie transferu i przeładowaniu strony, brak kolejnego PUT po błędzie
+potwierdzenia już przesłanego pliku oraz zatrzymanie pollingu po błędzie sieci
+i ręczne wznowienie. To nie jest dowód konfiguracji R2, weryfikacji Steam
+ani dostarczania SMTP.
+
+Lokalnie zaliczono 187 testów backendu/UI na PostgreSQL 16, łącznie 481 testów
+całej aplikacji; pominięto integrację lokalnego dema i prawdziwego R2.
+Lint/format, build, Django checks, migracje, zawartość wheel i collectstatic
+przeszły. Obraz web Linux zbudowano legacy builderem po timeout BuildKit;
+w kontenerze sprawdzono Django checks i dostępność szablonów oraz zebranych
+statyków. Nie uruchomiono tym samym pełnego Compose ani workera.
+
+Przed wdrożeniem zastosować migracje, podać `/static/` przez reverse proxy
+i wykonać rzeczywiste próby powyższych usług. Terminy i „wykonane” pozostają
+deklaracją gracza nawet po udanym odbiorze. Nie wolno używać ich jako dowodu
+automatycznego odczytu wyników ani spełnienia poniższego protokołu G1.
+
+## Odbiór modułu Stripe
+
+Zaimplementowano abonament 7,99 USD/mies. bez limitu liczby analiz własnego
+SteamID, z darmowymi 3 analizami na miesiąc kalendarzowy UTC. Zmiana kwoty
+zastępuje wcześniejszą politykę tygodniową. Migracja: `0005_billing_accounts`.
+Podpisane webhooki uzgadniają aktualny stan subskrypcji i opłacony okres
+faktury; redirect nie nadaje uprawnień. Błędy i duplikaty nie tworzą kolejnej
+sesji ani fałszywego potwierdzenia obsłużonego eventu.
+
+Anulowanie zwykłe jest na koniec opłaconego okresu; nieudane odnowienie
+nie przedłuża Pro, a już rozpoczęta analiza nie jest przerywana. Usunięcie
+konta najpierw wygasza checkouty i natychmiast anuluje subskrypcje, bez
+automatycznego zwrotu; bez potwierdzenia Stripe konto nie jest usuwane.
+
+Regresja PostgreSQL obejmuje podpisy/wygaśnięcie, ponowienia i współbieżność,
+nieuporządkowane eventy, okres opłacony, kwotę UTC, brak resetu SteamID,
+portal, brak podwójnych checkoutów i anulowanie przy usunięciu konta.
+Atrapy API nie potwierdzają działania prawdziwego Stripe.
+
+Zaliczone: 55 testów płatności, 242 backendu/UI i 536 w całej regresji; pominięto
+lokalne demo i kontrakt prawdziwego R2. Przeszły migracje, checks, lint i build.
+Syntetyczny odbiór przeglądarkowy potwierdza checkout/portal, brak nadania Pro po
+redirect, nadanie po podpisanym webhooku, anulowanie/wygaśnięcie, odświeżenie
+i mobilny układ. Zewnętrzny Stripe był atrapą; żadnej opłaty nie pobrano.
+
+W skonfigurowanym test mode przejść zakup i dostarczenie webhooka, odnowienie,
+nieudaną płatność, anulowanie, wygaśnięcie, usunięcie konta i ponowne uzgodnienie
+po niedostarczeniu zdarzenia. Użyć właściwej ceny i portalu zgodnie z README.
+Przed live powtórzyć weryfikację konfiguracji kluczy, ceny, webhooka i adresów
+powrotu; ustawić okresowe `reconcile_subscriptions` i reakcję na jego błąd.
+Nie wykonywano tutaj próby z rzeczywistymi poświadczeniami Stripe ani opłaty live.
+To odbiór techniczny płatności, nie pilot biznesowy.
+
+## Lokalny odbiór konfiguracji wdrożeniowej
+
+Dodano produkcyjne rozszerzenie Compose z Caddy, automatycznym TLS i statykami
+z obrazu budowanego razem z aplikacją. Tylko proxy publikuje porty; Django
+ufa nagłówkowi protokołu dopiero po jawnym włączeniu w webie za proxy.
+README zawiera procedurę pierwszego uruchomienia i aktualizacji oraz szablony
+systemd do okresowego uzgadniania Stripe, niezależnego od reapera.
+
+W izolowanym lokalnym projekcie Docker uruchomiono PostgreSQL, wszystkie
+migracje do `0005_billing_accounts`, web, worker, maintenance i Caddy.
+Lokalny CA służył wyłącznie tej próbie: klient weryfikował jego certyfikat,
+nie wyłączano walidacji TLS ani nie instalowano CA w systemie użytkownika.
+Sprawdzono HTTP → HTTPS, brak pętli przy podszytych `X-Forwarded-*`,
+logowanie i CSRF, secure cookies, HSTS bieżącego hosta, ochronę ramek,
+odmowę anonimowego dostępu do historii, zgodne hashe CSS/JS i brak
+publicznych portów weba/bazy. Powtórzono próbę po restarcie usług,
+a podmiana obrazu proxy faktycznie zmieniła serwowany CSS bez starego wolumenu.
+
+Reaper korzystał z jawnej atrapy pustego bucketa R2. Brak konfiguracji R2
+wcześniej powodował jawny błąd i restart reapera, nie pozorny sukces.
+Nie wykonano analizy prawdziwego dema, awarii parsera ani rzeczywistych
+połączeń R2/Steam/SMTP/Stripe. Timer systemd nie był instalowany/uruchamiany.
+Zaliczone: 20 ukierunkowanych testów ustawień, logowania, dostępu i CSRF
+na PostgreSQL, Ruff, walidacja Compose/Caddy i budowanie obrazów.
+Django deploy check pozostawia W005/W021: HSTS całych subdomen i preload
+nie są włączane bez odbioru docelowej domeny. Cała regresja nie była powtarzana.
+
+`prepare-deployment` nadal wymaga VPS/domeny, publicznego ACME, instalacji
+timera i odbioru po restarcie hosta. Lokalny odbiór nie zamyka G1/G2/G4
+ani rzeczywistych integracji; nie zmienia `unverified_in_game`.
+
 ## Zaimplementowany prototyp do końcowej próby
+
+Uzupełniająca próba backendu Linux: rzeczywisty upload dema Dust2
+(408 650 218 B) do lokalnego S3 Moto przeszedł przez kolejkę i worker do
+oczekiwanego `unsupported / unsupported_or_invalid_demo`. Naprawiono przy tym
+import Awpy bez `HOME`, ustawiając `AWPY_DATA_DIR` w katalogu uploadu.
+Obiekt S3 i katalog roboczy zostały usunięte; źródłowy plik pozostał bez zmian.
+248 testów backendu/UI przeszło, w tym regresja procesu bez katalogu domowego.
+To odbiór negatywny, bez prawdziwego R2/Steam i bez udanej analizy Mirage;
+nie zamyka odbioru workera, G2 ani G1.
 
 CLI `export-scenario` i `build-pack` używa wersji
 `yprac-sandbox-prototype-v1`. Paczka zapisuje `unverified_in_game`, źródła
@@ -190,10 +370,11 @@ w jego imieniu:
 
 ## Rozpoznanie przed próbą w grze
 
-1. Ustalić drogę od Hub `3070715607` do wspieranego Mirage i trybu Sandbox.
+1. Dla każdej mapy z uzgodnionej listy ustalić drogę od Hub `3070715607`
+   do jej wspieranej wersji i trybu Sandbox.
    Zanotować identyfikator rzeczywistej mapy, plik/rewizję i warunki dostępu.
-   Jeśli nie ma zgodnego Mirage, zatrzymać ten wariant; nie zmieniać mapy
-   analizatora ani celu eksportu bez osobnej decyzji.
+   Jeśli nie ma zgodnej wersji danej mapy, zatrzymać jej odbiór i zapisać
+   `blocked`; nie zastępować mapy źródłowej inną mapą treningową.
 2. Sprawdzić wymagany klient, jego wersję, `-condebug`, rejestrację i dostęp
    darmowy/premium oraz warunki komercyjnego użycia. Nie dodawać własnego klienta,
    serwera ani pluginu jako ukrytego wymagania.

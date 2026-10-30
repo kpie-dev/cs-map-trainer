@@ -48,16 +48,18 @@ def test_invalid_technical_sizes(user, storage, size):
     storage.begin.assert_not_called()
 
 
-def test_three_uploads_per_steam_rolling_week(user, storage):
+def test_three_uploads_per_steam_calendar_month(user, storage):
     for _ in range(3):
         item = services.initiate(user, uuid.uuid4(), 32, storage)
         Upload.objects.filter(pk=item.pk).update(
             state=Upload.State.UNSUPPORTED, cleanup_pending=False
         )
-    with pytest.raises(services.IntakeError, match="weekly_demo_limit"):
+    with pytest.raises(services.IntakeError, match="monthly_demo_limit"):
         services.initiate(user, uuid.uuid4(), 32, storage)
     oldest = Upload.objects.order_by("created_at").first()
-    Upload.objects.filter(pk=oldest.pk).update(created_at=timezone.now() - timedelta(days=7))
+    Upload.objects.filter(pk=oldest.pk).update(
+        created_at=services.month_start() - timedelta(microseconds=1)
+    )
     assert services.initiate(user, uuid.uuid4(), 32, storage)
 
 
@@ -242,6 +244,38 @@ def test_parser_child_invalid_header_and_timeout(upload, settings, tmp_path):
             tasks.run_parser(upload, tmp_path)
 
 
+def test_parser_child_without_home_uses_upload_scoped_awpy_directory(
+    upload, settings, tmp_path, monkeypatch
+):
+    settings.PARSER_MEMORY_BYTES = 8 * 1024**3
+    monkeypatch.setenv("HOME", "/outside-upload")
+    monkeypatch.setenv("AWPY_DATA_DIR", "/outside-upload/awpy")
+    (tmp_path / "input.dem").write_bytes(b"not-a-cs2-demo")
+    run_bounded = tasks.run_bounded
+    bootstrap = """
+import os
+import runpy
+import sys
+from pathlib import Path
+
+def unavailable_home():
+    raise RuntimeError("Could not determine home directory.")
+
+Path.home = staticmethod(unavailable_home)
+assert "HOME" not in os.environ
+import awpy.data
+assert awpy.data.AWPY_DATA_DIR == Path(sys.argv[1]).parent / "awpy"
+runpy.run_module("cs_map_trainer.web.processor", run_name="__main__")
+"""
+
+    def run_without_home(command, env, **kwargs):
+        assert env["AWPY_DATA_DIR"] == str(tmp_path / "awpy")
+        return run_bounded([command[0], "-c", bootstrap, *command[3:]], env, **kwargs)
+
+    with patch.object(tasks, "run_bounded", side_effect=run_without_home):
+        assert tasks.run_parser(upload, tmp_path) == (None, None)
+
+
 def test_parser_payload_cannot_inject_commands(upload, settings, tmp_path, training_report):
     report = training_report.model_dump(mode="json")
     report["player_steam_id"] = STEAM
@@ -258,6 +292,41 @@ def test_parser_payload_cannot_inject_commands(upload, settings, tmp_path, train
         _, scripts = tasks.run_parser(upload, tmp_path)
     assert scripts
     assert scripts[0]["console_line"] != "malicious"
+
+
+@pytest.mark.parametrize("valid", [True, False])
+def test_parser_report_group_cells_use_strict_json_validation(
+    upload, tmp_path, training_report, valid
+):
+    from pydantic import ValidationError
+
+    report = training_report.model_dump(mode="json")
+    scenario = report["scenario_document"]["scenarios"][0]
+    report["groups"] = [
+        {
+            "group_id": "group-a",
+            "observations": 1,
+            "wins": 0,
+            "losses": 1,
+            "win_rate": 0.0,
+            "player_side": scenario["player"]["side"],
+            "player_weapon": scenario["player"]["weapon"],
+            "opponent_weapon": scenario["opponent"]["weapon"],
+            "player_cell": [-2, 1, -1] if valid else ["-2", 1, -1],
+            "opponent_cell": [0, 0, 0],
+            "context_limitations": [],
+            "selected_scenario_ids": [scenario["scenario_id"]],
+        }
+    ]
+    (tmp_path / "result.json").write_text(json.dumps({"report": report, "error": None}))
+    with patch.object(tasks, "run_bounded"):
+        if valid:
+            result, scripts = tasks.run_parser(upload, tmp_path)
+            assert result["groups"] == report["groups"]
+            assert scripts[0]["console_line"]
+        else:
+            with pytest.raises(ValidationError):
+                tasks.run_parser(upload, tmp_path)
 
 
 def test_private_results_and_delete_history(api, user, upload):
@@ -482,7 +551,9 @@ def test_expired_account_tombstone_is_removed_only_after_window(
     with patch.object(tasks, "R2", return_value=storage):
         tasks.maintain()
     assert SteamIdentity.objects.filter(pk=STEAM).exists()
-    Upload.objects.filter(pk=upload.pk).update(created_at=timezone.now() - timedelta(days=8))
+    Upload.objects.filter(pk=upload.pk).update(
+        created_at=services.month_start() - timedelta(microseconds=1)
+    )
     with patch.object(tasks, "R2", return_value=storage):
         tasks.maintain()
     assert not SteamIdentity.objects.filter(pk=STEAM).exists()
@@ -584,16 +655,16 @@ def test_openid_nonce_is_single_use():
     assert not store.useNonce("https://steamcommunity.com/openid/login", now, "synthetic-nonce")
 
 
-def test_rolling_limit_counts_acceptance_not_an_older_reservation(user, storage):
+def test_monthly_limit_counts_acceptance_not_an_older_reservation(user, storage):
     for _ in range(3):
         item = services.initiate(user, uuid.uuid4(), 32, storage)
         Upload.objects.filter(pk=item.pk).update(
             state=Upload.State.READY,
             cleanup_pending=False,
-            created_at=timezone.now() - timedelta(days=8),
-            accepted_at=timezone.now() - timedelta(days=6),
+            created_at=services.month_start() - timedelta(microseconds=1),
+            accepted_at=timezone.now(),
         )
-    with pytest.raises(services.IntakeError, match="weekly_demo_limit"):
+    with pytest.raises(services.IntakeError, match="monthly_demo_limit"):
         services.initiate(user, uuid.uuid4(), 32, storage)
 
 

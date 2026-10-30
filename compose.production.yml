@@ -1,0 +1,58 @@
+x-production-environment: &production-environment
+  PGHOST: db
+  WORK_ROOT: /work
+  DJANGO_DEBUG: "0"
+  DJANGO_ALLOWED_HOSTS: ${CADDY_DOMAIN:?Set CADDY_DOMAIN to the public hostname}
+  CSRF_TRUSTED_ORIGINS: https://${CADDY_DOMAIN}
+  PUBLIC_BASE_URL: https://${CADDY_DOMAIN}
+
+services:
+  db:
+    restart: unless-stopped
+
+  web:
+    ports: !reset []
+    environment:
+      <<: *production-environment
+      DJANGO_TRUST_PROXY: "1"
+    restart: unless-stopped
+
+  worker:
+    environment: *production-environment
+    restart: unless-stopped
+
+  maintenance:
+    environment: *production-environment
+    restart: unless-stopped
+
+  proxy:
+    build:
+      context: .
+      dockerfile: Dockerfile.web
+      target: proxy
+    environment:
+      CADDY_DOMAIN: ${CADDY_DOMAIN}
+      ACME_EMAIL: ${ACME_EMAIL:?Set ACME_EMAIL for certificate notifications}
+    ports:
+      - "80:80"
+      - "443:443"
+    volumes:
+      - caddy-data:/data
+      - caddy-config:/config
+    depends_on:
+      web:
+        condition: service_started
+    restart: unless-stopped
+    read_only: true
+    tmpfs:
+      - /tmp:size=16m,mode=1777
+    cap_drop: [ALL]
+    cap_add: [NET_BIND_SERVICE]
+    security_opt: [no-new-privileges:true]
+    mem_limit: 256m
+    cpus: 0.5
+    pids_limit: 64
+
+volumes:
+  caddy-data:
+  caddy-config:

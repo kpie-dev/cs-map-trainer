@@ -15,12 +15,19 @@ w CS2/Yprac. Na potrzeby implementacji przyjmujemy poprawność komend
 i mechanizmu ustawiania scenariuszy. Próba w grze (G1) nie blokuje eksportera,
 backendu ani UI; jest częścią końcowego odbioru przed udostępnieniem
 zweryfikowanego treningu. Ta decyzja zastępuje wcześniejszy plan „najpierw
-G1 i płatny pilot, dopiero potem Django/UI”. Testy jednostkowe, integracyjne
+G1 przed Django/UI”. Testy jednostkowe, integracyjne
 backendu i UI oraz walidacja bezpieczeństwa pozostają w każdym etapie.
 Docelową grą pozostaje CS2, nie starsze CS:GO.
 
+**Rozszerzenie zatwierdzonego zakresu map:** Cache, Dust2, Mirage, Inferno,
+Nuke, Ancient i Anubis. Zastępuje wcześniejsze ograniczenie produktu do jednej
+mapy. Zrealizowany etap obejmuje Mirage i Dust2 w parserze, analizie,
+eksporterze, paczkach oraz aplikacji. Pozostałe pięć map wymaga implementacji.
+Jedyną integracją pozostaje Yprac, a zgodność w grze wymaga osobnego odbioru
+każdej mapy. Lista jest jawna i nie zmienia się automatycznie z rotacją turniejową.
+
 Stan implementacji: pakiet Python, kontrakt scenariuszy v1, walidator i CLI
-`players`/`analyze`/`benchmark` z przypiętym Awpy 3.1.1. Czytamy dema CS2 Mirage
+`players`/`analyze`/`benchmark` z przypiętym Awpy 3.1.1. Czytamy dema CS2 Mirage i Dust2
 i generujemy raport JSON v2 z migawkami sprzed wymiany obrażeń, grupowaniem oraz
 wykluczeniami. Grupy rozdzielają liczbę porażek od win rate w porównywalnych,
 przefiltrowanych wygranych i przegranych starciach. Dokument scenariuszy nadal ma v1.
@@ -29,15 +36,22 @@ pitch/yaw przybliżają kierunkiem ku graczowi z jawnym oznaczeniem; kąty gracz
 nie są zgadywane. Ta sama reguła obowiązuje dla porównywalnych wygranych.
 Benchmark uruchamia każdą próbę w nowym procesie i nie deklaruje wyczyszczenia cache.
 Pipeline sprawdzono na publicznych demach Valve i FACEIT z dogrywką;
-pełny benchmark na docelowym VPS i ocena trenera
+pełny benchmark na docelowym VPS
 pozostają otwarte. Jest prototyp eksportera Yprac i paczek ZIP z CLI
-`export-scenario`/`build-pack`, bez treningowego UI i potwierdzenia importu w grze.
+`export-scenario`/`build-pack`, bez potwierdzenia importu w grze.
 Minimalny backend Django/PostgreSQL/Django-Q2 już istnieje: konta e-mail,
 Steam OpenID, intake R2, kwoty na SteamID, jednorazowa analiza, historia
 i sprzątanie. Backend treningowy zapisuje wybór i odrzucenia przy raporcie,
 udostępnia prywatny eksport jednej linii komend/CFG i opcjonalny ZIP na żądanie.
 Nie parsuje ponownie dema ani nie zapisuje ZIP w R2.
+UI Tactical HUD na szablonach Django obejmuje konto/Steam, upload i statusy,
+prywatną historię, raport, wybór i kopiowanie komend. Są deklarowane oceny
+i stronicowana kolejka powtórek; nie ma telemetrii z gry.
 Rzeczywiste integracje R2/Steam/SMTP wymagają odbioru.
+Konfiguracja wdrożeniowa Caddy/HTTPS/statyków jest przygotowana w
+`compose.production.yml`, z lokalnym odbiorem Compose i testowym CA.
+To nie jest wdrożenie na VPS ani dowód publicznego TLS. Procedura jest w README,
+a szczegóły i pozostały odbiór `prepare-deployment` w `implementation-todos.md`.
 Uruchomienie opisuje
 `../README.md`, a wymaganą próbę w grze `integration-validation.md`.
 Poprawność dokumentu JSON nie potwierdza importu.
@@ -77,7 +91,8 @@ do nowej sesji: [implementation-todos.md](implementation-todos.md).
 
 Ten plik jest źródłem prawdy do kontynuacji, niezależnym od historii rozmowy
 i sesyjnej bazy zadań. Nie zaczynać implementacji od nowa: kod backendu treningowego
-jest gotowy na istniejącym parserze i kontrakcie; następnie zbudować UI.
+jest gotowy na istniejącym parserze i kontrakcie; UI i osobiste powtórki
+także są już zaimplementowane.
 
 ### Gotowe
 
@@ -88,14 +103,17 @@ jest gotowy na istniejącym parserze i kontrakcie; następnie zbudować UI.
 | CLI | `players`, `analyze`, `benchmark`, `validate-scenarios`, `schema`; JSON na stdout lub do nowego pliku bez nadpisywania | `cli.py` |
 | Eksport prototypowy Yprac | `export-scenario`: jedna linia lub opcjonalny CFG; walidacja mapy/broni/liczb, stałe komendy; indeksy gracza i encji `2` jako osobne założenia, orientacja przez `point_teleport`, status `unverified_in_game` | `exporting.py`, `cli.py` |
 | Paczki treningowe | `build-pack`: wybór/odrzucanie po ID, ZIP z manifestem, scenariuszami, instrukcją, osobnymi TXT i opcjonalnym CFG; raport v2 lub dokument v1, zapis bez nadpisywania | `packs.py`, `artifacts.py`, `cli.py` |
-| Parser | Nieskompresowane CS2 `.dem` do 1 GiB, tylko `de_mirage`; skład, rundy, zgony, obrażenia i zbiorcze migawki; hash wejścia i jawne błędy | `parsing.py` |
+| Parser | Nieskompresowane CS2 `.dem` do 1 GiB, `de_mirage` i `de_dust2`; skład, rundy, zgony, obrażenia i zbiorcze migawki; hash wejścia i jawne błędy | `parsing.py`, `maps.py` |
 | Analiza | Wspólny tick sprzed obrażeń, pozycje i dostępne kąty obu stron; brakujący pitch/yaw przeciwnika przybliżany kierunkiem ku graczowi z jawnym oznaczeniem; wykluczenia i grupowanie z kontekstem | `analysis.py` |
 | Statystyki | Raport `analysis_version: 2`; porównywalne wygrane i przegrane, liczebność próby, win rate tylko w przefiltrowanych rozstrzygniętych starciach; ranking według liczby porażek | `analysis.py` |
 | Benchmark | Każdy przebieg w nowym procesie; czas, CPU, RSS, operacje blokowe I/O, rozmiar JSON, timeout i kontrola identyczności wyników; bez fałszywej deklaracji cold cache | `benchmark.py` |
 | Docker | Wieloetapowy obraz CLI, użytkownik bez roota, zależności wykonawcze z lockfile, dane przez bind mount; bez serwera WWW | `Dockerfile`, `.dockerignore`, `README.md` |
 | Testy i CI | Testy jednostkowe, opt-in integracja na lokalnym demie, workflow lint/format/test/build; zdalny wynik GitHub Actions nie był tu potwierdzany | `tests/`, `.github/workflows/ci.yml` |
-| Minimalny backend | Django/PostgreSQL, e-mail + Steam OpenID, prywatny multipart R2, kwoty 3/7 dni na SteamID, Q2, jednorazowy worker i prywatne wyniki/skrypty | `web/`, `tests/web/` |
+| Minimalny backend | Django/PostgreSQL, e-mail + Steam OpenID, prywatny multipart R2, Free 3 analizy/miesiąc UTC na SteamID, Q2, jednorazowy worker i prywatne wyniki/skrypty | `web/`, `tests/web/` |
 | Backend treningowy | Zapamiętany wybór/odrzucenia, prywatna linia komend i opcjonalny CFG oraz ZIP na żądanie z raportu, bez R2 i ponownego parsowania; migracja `0003_training_selection` | `web/models.py`, `web/services.py`, `web/views.py`, `tests/web/test_training.py` |
+| UI treningowe | Responsywne Tactical HUD według `design/`: strona główna/upload, allauth, konto/Steam, historia/status, raport z ograniczeniami, wybór, kopiowanie i opcjonalne pobrania | `web/pages.py`, `web/presentation.py`, `web/templates/`, `web/static/` |
+| Osobiste powtórki | Deklarowane oceny i terminy 1/3/7 dni, wyłączenie nietrafnych do przywrócenia, prywatna kolejka respektująca wybór i usuwanie; migracja `0004_practicereview` | `web/practice.py`, `web/models.py`, `tests/web/test_ui.py` |
+| Abonament Stripe | Checkout/portal, podpisane i idempotentne webhooki, uzgodnienie opłaconego okresu, Pro 7,99 USD/mies. bez limitu analiz własnego SteamID, anulowanie przed usunięciem konta; migracja `0005_billing_accounts`; prawdziwy Stripe do odbioru | `web/billing.py`, `web/billing_views.py`, `tests/web/test_billing.py` |
 | Usuwanie wejść | Po pierwszej próbie, także błędnej; osobny reaper i ponawianie usuwania, wygaśnięcie porzuconych wejść, usuwanie historii/konta | `web/tasks.py`, `web/services.py` |
 
 Ścieżki modułów w tabeli odnoszą się do `src/cs_map_trainer/`.
@@ -122,6 +140,8 @@ To nie jest ręczna weryfikacja każdego kontaktu ani benchmark docelowego VPS.
 | Poprawki review backendu | Dodano dziedziczoną blokadę wolumenu i ochronę parsera po śmierci rodzica. Ograniczono profil Steam przed lookup allauth, również przy ponownym/odrzuconym łączeniu; migracja `0002_minimize_steam_profiles` oczyszcza starsze zapisy. Po poprawkach: 69 testów backendu, 363 zaliczone w całej regresji, 2 pominięte integracje; lint/format/build, checks i migracje bez błędów |
 | Ponowne review backendu | Zakończone bez nowych istotnych błędów w poprawkach parsera, kolejce, minimalizacji Steam i migracji. Review odczytowe, bez ponownego uruchamiania regresji; nie potwierdza kontenera Linux ani rzeczywistych R2/Steam/SMTP |
 | Dokończenie backendu treningowego | Dodano zapis wyboru i odrzuceń przy raporcie, autoryzowany eksport komend/CFG oraz opcjonalny ZIP generowany na żądanie. Domyślnie wszystkie sytuacje; wybór czyszczony wraz z historią/kontem. 127 testów backendu na PostgreSQL 16 w osobnym kontenerze; cała regresja 421 zaliczonych, 2 pominięte (demo i prawdziwe R2). Lint/format, build, Django checks, zastosowanie migracji i zgodność modeli przeszły. Nie jest to odbiór obrazu workera Linux ani usług zewnętrznych |
+| UI i osobiste powtórki | Zrealizowano `build-training-ui` i `wire-personal-training` według stylistyki `design/`, bez fikcyjnej telemetrii. 187 testów backendu/UI na PostgreSQL 16; cała regresja 481 zaliczonych, 2 pominięte (demo i prawdziwe R2). Odbiór przeglądarkowy na syntetycznych danych: formularze, wybór, pełna linia/schowek, oceny/przywrócenie, mobile, PUT/retry po przeładowaniu i zatrzymanie/wznowienie pollingu. Lint/format, build, migracje, wheel i collectstatic przeszły; obraz web Linux zbudowany legacy builderem po timeout BuildKit, checks/szablony/statyki sprawdzone. Nie odebrano Compose/workera ani R2/Steam/SMTP |
+| Stripe i polityka Free/Pro | Zrealizowano `build-subscriptions`: 7,99 USD/mies. bez limitu liczby analiz własnego SteamID, Free 3/miesiąc UTC, checkout/portal, webhooki i uzgodnienie, anulowanie przed usunięciem konta. 55 testów płatności; łącznie 242 backendu/UI, 536 całej aplikacji, 2 pominięte (demo i prawdziwe R2). Migracje/checks/lint/build i syntetyczna próba przeglądarkowa przeszły. Prawdziwy Stripe pozostaje do konfiguracji i odbioru; nie wykonano opłaty live |
 
 Przybliżenie kierunku zakłada jednakową wysokość oczu stojących uczestników.
 Nie zastępuje brakującej pozycji, nie naprawia nieprawidłowych kątów i nie
@@ -131,14 +151,26 @@ decyzją nie blokuje to backendu i UI; weryfikacja nastąpi na końcu.
 
 ### Czego jeszcze nie ma
 
-Nie ma potwierdzonego działającego importu do Yprac, ocen treningu ani kolejki
-powtórek. Eksporter, selekcja CLI i paczki są implementacją prototypową na
+Dodatkowo odebrano negatywną ścieżkę workera Linux na rzeczywistym demie
+Dust2 (408 650 218 B), z HTTP uploadem do emulatora S3 Moto, kolejką
+i odrzuceniem nieobsługiwanej mapy. Naprawiono import Awpy bez katalogu
+domowego przez jawne `AWPY_DATA_DIR` wewnątrz katalogu uploadu.
+Regresja backendu/UI: 248 testów zaliczonych. Potwierdzono usunięcie wejść;
+udana analiza Mirage oraz prawdziwe R2/Steam i próby awarii nadal do odbioru.
+
+Nie ma potwierdzonego działającego importu do Yprac. Eksporter, selekcja CLI
+i paczki są implementacją prototypową na
 zaakceptowanych założeniach, nie dowodem integracji. Minimalny backend ma już
 konta, upload, bazę, kolejkę, izolowany proces parsera i prywatną historię.
 Jest zapamiętany wybór sytuacji i autoryzowany eksport przez backend WWW.
-Nie ma treningowego UI, płatności ani pełnego wdrożenia TLS/backup/monitoring.
+UI, deklarowane oceny i prosta kolejka powtórek są gotowe w kodzie i lokalnym
+odbiorze. Moduł płatności Stripe jest zaimplementowany, ale prawdziwe Stripe
+i pełne wdrożenie TLS/backup/monitoring wymagają konfiguracji i odbioru.
 Prawdziwe R2/Steam/SMTP oraz obraz
-Compose nie są potwierdzone lokalną próbą. Nie przedstawiać tego jako gotowego produktu.
+Compose z prawdziwymi usługami nie są potwierdzone. Lokalnie uruchomiono już
+pełny Compose web/db/worker/maintenance/Caddy z atrapą pustego R2, sprawdzając
+HTTPS, logowanie/CSRF, cookies, statyki i restart; nie analizę rzeczywistego dema.
+Nie przedstawiać tego jako gotowego produktu.
 
 ### Od czego zacząć następny wątek
 
@@ -154,15 +186,20 @@ Compose nie są potwierdzone lokalną próbą. Nie przedstawiać tego jako gotow
    `0002_minimize_steam_profiles` i `0003_training_selection`.
    Osobno dokończyć odbiór R2/Steam/SMTP z prawdziwą konfiguracją oraz cyklu
    życia parsera w kontenerze Linux; nie blokuje to implementacji UI.
-4. Rozpocząć `build-training-ui` na szablonach Django: upload, status zadania,
-   powiązanie Steam, raport, zapamiętany wybór sytuacji i kopiowanie komend
-   jednym przyciskiem. ZIP/CFG pozostają opcjonalne, nie obowiązkowym krokiem.
+4. `build-training-ui` i `wire-personal-training` są zrealizowane.
+   Przeczytać `web/pages.py`, `web/practice.py` i `tests/web/test_ui.py`.
+   Zastosować wszystkie migracje do `0005_billing_accounts` na docelowym VPS
+   i odebrać istniejący wariant Caddy/TLS/statyków według README.
+   Następnie backup/odtworzenie, monitoring i limity zasobów.
+   `build-subscriptions` ma kod i lokalny odbiór: Stripe, 7,99 USD/mies.
+   bez limitu analiz własnego SteamID; Free 3 analizy/miesiąc kalendarzowy UTC.
+   Zastosować migrację `0005_billing_accounts`, skonfigurować i odebrać Stripe.
 5. Sprawdzić aplikację automatycznie, następnie wykonać końcowe próby w CS2/Yprac:
    jedna sytuacja, potem 10, orientacja obu stron, broń, restart i jedno wklejenie.
    Brak próby oznacza „niezweryfikowane w grze”, nie zakaz implementacji.
 6. Przed udostępnieniem potwierdzić zgodność mapy i komend, zasoby oraz
-   uprawnienia. Pilot płatny i decyzja o dalszym skalowaniu następują później,
-   nie są warunkiem rozpoczęcia backendu/UI.
+   uprawnienia. Moduł miesięcznego abonamentu jest częścią pozostałego zakresu.
+   Nie ma etapu pilota biznesowego ani obowiązkowej oceny przez trenera.
 
 Polecenia lokalne są opisane w `README.md`; projekt nadal obsługuje uruchomienie
 przez skrypty i Docker, bez potrzeby UI. Szczegółowe statusy i zależności
@@ -170,20 +207,33 @@ pozostałych etapów są w sekcji „Todos i zależności”.
 
 ## Rekomendacja
 
-Warunkowe TAK dla wąskiego produktu: użytkownik przesyła demo, wybiera siebie, dostaje powtarzające się przegrane pojedynki i paczkę treningową odtwarzającą ich ustawienie przestrzenne. NIE dla obietnicy automatycznego wykrywania wszystkich największych błędów i wiernego odtwarzania całych akcji.
+Zakres produktu: użytkownik przesyła demo swojego powiązanego gracza i otrzymuje
+trening odtwarzający ustawienia przegranych pojedynków. Nie budujemy procesu
+oceny przez trenerów, pilota biznesowego ani automatycznego wykrywania wszystkich
+błędów. Deklarowane oceny użytkownika i kolejka powtórek pozostają.
 
 Zgodnie z decyzją właściciela najpierw powstają backend i UI, przy założeniu
 poprawności komend, a próby importu do Yprac Hub/Sandbox odbywają się na końcu.
 To świadome ryzyko późniejszych poprawek eksportera i przepływu aplikacji.
-Potwierdzony trening i płatności nadal są podstawą decyzji o skalowaniu
-produktu, ale nie blokują budowy aplikacji. Python pozostaje wybranym stosem.
+Moduł opłat za serwis ma obsługiwać miesięczny abonament. Python pozostaje
+wybranym stosem. Techniczne próby aplikacji i Yprac nie są pilotem biznesowym.
 
 ## Uzgodniony zakres
 
-- Pierwszy odbiorca: gracz indywidualny, model freemium z niedrogą subskrypcją. Równolegle kontakt z trenerami słabszych drużyn i akademii jako partnerami walidującymi i kanałem sprzedaży.
+- Mapy CS2: **Cache (`de_cache`), Dust2 (`de_dust2`), Mirage (`de_mirage`),
+  Inferno (`de_inferno`), Nuke (`de_nuke`), Ancient (`de_ancient`) i Anubis
+  (`de_anubis`)**. Docelowy zakres obejmuje analizę i generowanie treningu dla
+  każdej z nich; nie jest ograniczony do map aktualnej rotacji Active Duty.
+  Obsługa mapy w parserze nie oznacza potwierdzonego odtworzenia jej w Yprac.
+- Odbiorca: gracz indywidualny. Bez oceny przez trenerów i pilota biznesowego.
+- Model opłat: Stripe Billing, **7,99 USD miesięcznie, bez limitu liczby analiz
+  własnego powiązanego SteamID**. Free: **3 analizy na miesiąc kalendarzowy UTC**,
+  reset pierwszego dnia o 00:00 UTC. Te ustalenia zastępują wcześniejsze 3/7 dni
+  i plan „większy limit do ustalenia”.
 - Zatwierdzono limit minimalnego backendu: 3 przyjęte dema na zweryfikowany
-  SteamID w ruchomych 7 dniach, nie na konto e-mail. 1 GiB pozostaje technicznym
-  limitem pojedynczego pliku, nie kwotą rozliczeniową.
+  SteamID w miesiącu UTC w Free, nie na konto e-mail. 1 GiB pozostaje technicznym
+  limitem pojedynczego pliku. Pro nie znosi jednego aktywnego zadania na SteamID
+  ani jednego parsera globalnie.
 - Rdzeń MVP łączy prostą analizę i odtworzenie pozycji z konkretnych przegranych pojedynków. Same ogólne zalecenia lub dobór gotowego ćwiczenia nie wystarczą.
 - Użytkownik akceptuje istniejący klient Yprac. Preferuje skopiowanie komend
   do konsoli zamiast umieszczania pobranych plików w katalogu klienta; `.cfg`
@@ -201,10 +251,9 @@ produktu, ale nie blokują budowy aplikacji. Python pozostaje wybranym stosem.
   Nie implementować równolegle Yprac, Grindhouse i Refrag.
 - Kolejność realizacji: backend z eksporterem i paczkami, następnie UI,
   na końcu próby w CS2/Yprac. Poprawność komend jest założeniem roboczym;
-  testy aplikacji trwają przez cały rozwój. Płatny pilot nie blokuje Django/UI.
-- Liczby testerów, aktywacji, powrotów i płatności są metrykami pomocniczymi,
-  nie progami automatycznie blokującymi przejście do SaaS.
-- Bieżący kod jest bez UI, ale planowane MVP obejmuje backend i UI aplikacji
+  testy aplikacji trwają przez cały rozwój. Moduł abonamentowy należy do aplikacji,
+  nie jest uzależniony od pilota lub biznesowej walidacji.
+- Bieżący kod obejmuje backend i UI aplikacji
   oraz lokalny CS2 z Yprac Hub i wymaganymi komponentami Yprac. Czysty CS2
   z `sv_cheats 1` nie zastępuje domyślnie tej integracji.
 - Skrypt ma sam rozpoznawać bota i odtwarzać także jego orientację. Ręczne podanie
@@ -213,22 +262,13 @@ produktu, ale nie blokują budowy aplikacji. Python pozostaje wybranym stosem.
   zaakceptowanych założeniach, z oznaczeniem braku próby w grze. Badanie
   skryptów i kontakt z autorem pozostają opcją w razie niepowodzenia odbioru.
 
-## Krytyka biznesowa
+## Granice produktu
 
-| Ryzyko | Dlaczego ma znaczenie | Najtańsza odpowiedź |
-|---|---|---|
-| Kolejny dashboard statystyk | Leetify i SCOPE już adresują analizę, a Yprac i Refrag trening. Sam parser, heatmapa czy opis AI są łatwe do skopiowania. | Sprzedawać konkretny rezultat: własne pojedynki gotowe do ćwiczenia i kolejkę powtórek. Zweryfikować dokładne nakładanie się funkcji konkurencji przed deklarowaniem unikalności. |
-| „Najczęściej tam giniesz” nie oznacza „tam grasz najgorzej” | Popularna pozycja generuje więcej zdarzeń; zgony zależą od roli, ekonomii, przeciwników i ekspozycji. | Oddzielić liczbę zgonów od skuteczności pojedynków. Przy małej próbie pokazywać liczbę obserwacji i brak podstaw do silnego wniosku. |
-| Śmierć nie zawsze jest błędem | Dobry entry, poświęcenie pod trade, zła komunikacja lub cel zespołowy nie wynikają jednoznacznie z dema. | Nazywać wynik kandydatem do treningu, nie werdyktem. Umożliwić odrzucenie sytuacji i ocenę przez trenera. |
-| Gracz czyta raport, ale nie ćwiczy | Upload, instalacja, import i uruchomienie mogą zabić aktywację. | Mierzyć przejście od analizy do rzeczywistego treningu, nie liczbę wysłanych dem i pobrań ZIP. |
-| 3 darmowe dema tygodniowo mogą wystarczyć | Wtedy większy limit nie daje wystarczającej motywacji do abonamentu. | Testować limity zamiast je utrwalać. Płatna wartość: historia problemów, zapisane paczki, własny wybór pojedynków i kolejka powtórek. |
-| Drugi abonament | Gracz może dodatkowo potrzebować płatnego dostępu do map lub trybów dostawcy. Yprac opisuje darmową rotację i premium. | Sprawdzić prawa dostępu do wybranego trybu; pokazać całkowity koszt przed zakupem. Preferować ścieżkę niewymagającą dodatkowej płatności. |
-| Zbyt szeroki start B2C i B2B | Panel drużyn, role, rozliczenia i raportowanie trenerów to drugi produkt. | Początkowo trener ocenia paczki poza aplikacją. Funkcje drużynowe dopiero po potwierdzonym zainteresowaniu płatnym. |
-| Zależność od cudzych aktualizacji | Zmiana CS2, parsera, mapy albo komend partnera może zepsuć eksport. | Jedna wspierana integracja i mapa, przypięte wersje, testy regresji oraz możliwość jawnego wyłączenia niedziałającego eksportu. |
-
-Przewaga, jeśli powstanie, będzie wynikała z jakości wybranych sytuacji, bezproblemowego uruchomienia treningu oraz danych o tym, które ćwiczenia pomagają. Nie z użycia Pythona ani LLM.
-
-Analogia do Chessable jest użyteczna dla powtórek i zapamiętywania sytuacji. Nie jest trafna jako obietnica obiektywnego silnika oceny decyzji: CS2 zawiera niepełną informację, komunikację głosową i intencje zespołu niewidoczne w standardowej analizie.
+Rdzeń to demo → kandydaci → wygenerowany trening. Raport nie jest werdyktem
+o błędzie; ocena po ćwiczeniu jest deklaracją użytkownika, nie telemetrią z gry.
+Nie dodajemy programu trenerskiego, badań skuteczności, metryk powrotów ani
+bramek walidacji biznesowej. Pozostają testy technicznej poprawności parsera,
+aplikacji, płatności i komend w Yprac oraz pomiary zasobów potrzebne do utrzymania.
 
 ## Co potwierdzają źródła, a czego jeszcze nie wiadomo
 
@@ -269,21 +309,33 @@ konsoli CS2 na interfejs Yprac bez sprawdzenia jego możliwości.
 4. Regresja kontraktów, zadań, wyboru, eksportów, uprawnień i limitów zaliczona.
    G2 oznacza gotowość backendu, nie potwierdzenie treningu w grze.
 
-### Etap UI — następna implementacja, jeszcze nierozpoczęta
+### Etap UI — kod i lokalny odbiór gotowe
 
 `complete-training-backend` jest zakończone w zakresie kodu i lokalnego odbioru.
 Nie przepisywać selekcji, eksportera ani prywatnych operacji. Przed uruchomieniem
-na istniejącej bazie zastosować migracje, w tym `0003_training_selection`.
+na istniejącej bazie zastosować wszystkie migracje, w tym `0005_billing_accounts`.
 
-Szablony Django, opcjonalnie HTMX: konto/Steam, prywatna historia,
+Zaimplementowano szablony Django i lokalne CSS/JS, bez HTMX: konto/Steam, prywatna historia,
 upload z potwierdzeniem uprawnień i błędy wejścia, status zadania,
 raport z ograniczeniami i przybliżonymi kątami, wybór/odrzucanie
 sytuacji z zachowaniem wyboru oraz przycisk kopiowania pełnego ustawienia scenariusza.
 ZIP i CFG są opcjonalnymi pobraniami, nie wymaganym krokiem treningu.
 Jeden scenariusz aktywny naraz; bez ręcznego indeksu bota i przepisywania
-wielu komend. Pokryć UI testami przepływu, uprawnień, CSRF i błędów.
-Po `build-training-ui` przejść do `wire-personal-training`, obejmującego
-deklarowane oceny i proste powtórki.
+wielu komend. UI pokryto testami przepływu, uprawnień, CSRF i błędów.
+Zrealizowano również `wire-personal-training`: `PracticeReview` przechowuje jedną
+bieżącą deklarację na sytuację. Trudne wyznacza powtórkę za 1 dzień, wykonane
+za 3 dni, łatwe za 7 dni; nietrafne wyłącza sytuację do ręcznego przywrócenia.
+Terminy liczone są od chwili oceny po stronie serwera. Brak oceny oznacza nową
+sytuację. Zmiana wyboru nie kasuje ocen; kolejka uwzględnia aktualny wybór
+ze wszystkich gotowych prywatnych raportów i stronicuje wynik. Usuwanie
+raportu/konta usuwa oceny, także przy równoległym zapisie.
+
+Wygląd oparto na `design/`, bez demonstracyjnych wyników, obietnic diagnozy
+błędów, automatycznych wyników treningu i radaru bez potwierdzonego podkładu.
+Przeglądarkowy odbiór syntetyczny potwierdza formularze, wybór, pełną linię,
+schowek i odmowę dostępu, deklaracje/przywrócenie, mobilny układ oraz PUT i retry
+transportu z tym samym UUID. Nie zastępuje próby prawdziwych R2/Steam/SMTP.
+Statyki są pakowane w wheel i zbierane w obrazie; produkcyjny proxy musi je podać.
 Do odbioru w grze UI i manifest wskazują „niezweryfikowane w grze”.
 G3 oznacza gotowość aplikacji do końcowych prób, nie decyzję biznesową.
 
@@ -292,20 +344,20 @@ G3 oznacza gotowość aplikacji do końcowych prób, nie decyzję biznesową.
 Po ukończeniu backendu i UI wykonać poniższą procedurę. Brak testera odracza
 odbiór w grze, ale nie blokuje wcześniejszej implementacji.
 
-1. Zacząć od wskazanego Hub `3070715607`. Ustalić konkretną wspieraną wersję Mirage i tryb Sandbox, wymagany klient oraz dostęp. Parser obsługuje `de_mirage`, ale zgodność docelowej mapy pozostaje niepotwierdzona.
+1. Zacząć od wskazanego Hub `3070715607`. Dla każdej z siedmiu map ustalić konkretną wspieraną wersję i tryb Sandbox, wymagany klient oraz dostęp. Obecny parser obsługuje `de_mirage` i `de_dust2`; pozostałe mapy wymagają implementacji. Zgodność każdej docelowej mapy pozostaje do odbioru.
 2. Na ręcznie przygotowanej sytuacji sprawdzić: ustawienie XYZ i kąta gracza, ustawienie XYZ i kąta jednego bota, broń, restart i ponowne wykonanie ćwiczenia.
 3. Ustalić rzeczywisty mechanizm importu: natywny format scenariusza, oficjalny interfejs albo komendy dostępne w wybranym trybie. W razie braku dokumentacji zapytać autora Yprac o wspierany import i zgodę na integrację.
 4. Jeżeli proponowany mechanizm to `.cfg`, wykonać próbę od czystej instalacji użytkownika: kopiowanie paczki, wejście do właściwego trybu i `exec`. Samo wygenerowanie syntaktycznie poprawnego pliku nie jest dowodem działania.
 5. Osobno sprawdzić kolejność wykonania. Sekwencja teleport -> komenda chat -> teleport nie musi być synchroniczna. Nie opierać produktu na zgadywanych opóźnieniach, masowym spamowaniu chatu ani niepotwierdzonym `wait`.
 6. Zweryfikować uprawnienia. Komenda lokalna nie oznacza uprawnienia do teleportowania się na zewnętrznym serwerze. Yprac, czysta sesja lokalna i serwer Grindhouse to różne środowiska.
 7. Potwierdzić zgodność współrzędnych oraz geometrii konkretnej wersji mapy z demem. Wspólna nazwa mapy nie wystarczy.
-8. Przeprowadzić próbę paczki 10 różnych pojedynków, po jednym aktywnym scenariuszu naraz. Porównać pozycje, orientację, broń i możliwość powtórki z referencją; zapisać ograniczenia oraz wyniki.
+8. Dla każdej mapy przeprowadzić próbę jednej sytuacji, następnie paczki 10 różnych pojedynków, po jednym aktywnym scenariuszu naraz. Porównać pozycje, orientację, broń i możliwość powtórki z referencją; zapisać ograniczenia oraz wyniki osobno dla każdej mapy.
 
 Kryterium końcowego odbioru: automatyczne ustawienie i powtórzenie scenariuszy działa od początku do końca na koncie zwykłego użytkownika, w zadeklarowanym środowisku, bez ręcznego stawiania botów i bez kruchych wyścigów czasowych. G1 jest wykonywane po G2 i G3, mimo zachowania historycznej numeracji.
 
 Jeśli Yprac nie zapewnia tej ścieżki, udokumentować wynik i uzyskać współpracę
 autora albo osobną decyzję o alternatywie. Nie przełączać configu samodzielnie
-na inną mapę, czysty CS2 lub własny serwer i nie implementować równolegle
+na mapę spoza uzgodnionej listy, czysty CS2 lub własny serwer i nie implementować równolegle
 trzech niedokumentowanych adapterów.
 
 Własny serwer z pluginem CounterStrikeSharp może zapewnić kontrolę nad spawnami i wynikami, ale dodaje C#/.NET, administrację CS2 i koszty serwerów. To plan awaryjny wymagający osobnej decyzji, nie automatyczny zakres MVP. Plugin serwerowy nie jest plikiem do skopiowania do zwykłego klienta gry.
@@ -314,7 +366,9 @@ Jeżeli żaden tani mechanizm nie spełnia wymogu automatycznego ustawiania, jaw
 
 ## MVP: dokładny przepływ i granice
 
-1. Użytkownik przesyła `.dem` i po odczytaniu składu wskazuje swój SteamID. Trener może wskazać innego uprawnionego zawodnika.
+1. Użytkownik potwierdza e-mail, łączy Steam OpenID i przesyła uprawnione `.dem`.
+   Analiza dotyczy tylko powiązanego SteamID, którego obecność sprawdzamy w demie.
+   Wybór innego zawodnika i pakiet trenera są poza zakresem.
 2. System wybiera bezpośrednie przegrane pojedynki i pokazuje dowody: mapa, runda, uczestnicy, pozycje, broń oraz kontekst zdarzenia.
 3. Powtarzające się podobne sytuacje tworzą małe grupy. Ranking rozdziela częstość od skuteczności i wskazuje rozmiar próby.
 4. Użytkownik dostaje małą paczkę scenariuszy: jego punkt startu i bot w pozycji przeciwnika z tej samej chwili. Opcjonalnie dobierany jest gotowy drill dla mierzalnego problemu.
@@ -368,7 +422,8 @@ Django -> PostgreSQL: użytkownicy, uprawnienia, zadania, wyniki, powtórki
   ponownego uploadu. Historia nie wygasa automatycznie, użytkownik może ją usunąć.
 - FastAPI ma sens, jeśli wykonawca już ma gotowy frontend i infrastrukturę auth/admin. W pustym projekcie oznacza więcej elementów do samodzielnego złożenia.
 - Brak LLM, GPU, Kubernetes, ClickHouse, wektorowej bazy i własnej infrastruktury gry w podstawowym wariancie.
-- Do pilota wystarczy zewnętrzny link płatniczy i ręczne nadanie dostępu. Automatyczny abonament i webhooki dopiero po potwierdzeniu płatności.
+- Miesięczny abonament z płatnością u operatora i webhookami jest częścią
+  pozostałej implementacji. Powrót z checkoutu nie może sam nadawać płatnego limitu.
 
 ### Minimalny model danych i moduły
 
@@ -386,9 +441,9 @@ adresu, potem połączenia Steam przez OpenID. Provider allauth potrzebuje klucz
 Steam Web API do profilu; zapisujemy z niego wyłącznie SteamID.
 Powiązanie jest unikalne, bez samodzielnego odpinania. Analiza dotyczy tylko
 powiązanego gracza, którego obecność sprawdzamy w demie. Przyszły pakiet
-trenera/akademii ma analizować różnych zawodników na osobnym uprawnieniu
-i kwocie konta/organizacji, bez konieczności przypisywania każdego SteamID;
-nie implementować go ani płatności w tej iteracji.
+trenera/akademii jest poza zakresem. Abonament za serwis jest w kodzie;
+serwer sprawdza opłacony okres i egzekwuje Free. Zmiana konta aplikacji dla
+tego samego SteamID nie resetuje kwoty bieżącego miesiąca.
 
 Wewnętrzny scenariusz przechowuje: `schema_version`, źródło/rundę/ticki, mapę i jej identyfikatory wersji, punkt oraz orientację gracza, punkt oraz orientację bota, broń, obsługiwane parametry i ograniczenia. Pozycje to światowe XYZ, nie piksele radaru.
 
@@ -434,7 +489,8 @@ Nie nadpisywać `autoexec.cfg`, istniejących bindów ani ustawień użytkownika
 Poniższe liczby są założeniami do rachunku, NIE benchmarkiem ani ofertą dostawcy:
 
 - Średni upload: 0,25 GB na demo.
-- 3 dema na tydzień to w przybliżeniu 13 dem miesięcznie na aktywnego gracza.
+- Free pozwala przyjąć 3 dema miesięcznie na SteamID. Pro nie ma limitu liczby;
+  rzeczywiste zużycie Pro trzeba mierzyć, nie wyprowadzać z poniższej tabeli Free.
 - Przykładowy pełny pipeline: 60 CPU-sekund na demo. Należy zmierzyć sumę pracy wszystkich wątków; to niekoniecznie 60 sekund oczekiwania użytkownika.
 - Surowe pliki usuwane po pierwszej próbie, bez bufora na retry. Wyłącznie
   porzucone uploady/zadania mają maksymalny okres oczekiwania 24 h; lifecycle
@@ -443,31 +499,55 @@ Poniższe liczby są założeniami do rachunku, NIE benchmarkiem ani ofertą dos
 
 | Aktywni darmowi gracze | Dema/miesiąc | Upload/miesiąc | CPU przy przyjętym założeniu | Średni stan surowych plików przy retencji 24 h i równym napływie |
 |---|---:|---:|---:|---:|
-| 100 | 1 300 | 325 GB | ok. 21,7 CPU-h | ok. 10,8 GB |
-| 1 000 | 13 000 | 3 250 GB | ok. 216,7 CPU-h | ok. 108,3 GB |
+| 100 | 300 | 75 GB | ok. 5 CPU-h | ok. 2,5 GB |
+| 1 000 | 3 000 | 750 GB | ok. 50 CPU-h | ok. 25 GB |
 
 Wniosek: liczba darmowych użytkowników ma znaczenie nawet przy niedrogim parserze. Równe miesięczne obciążenie nie gwarantuje obsługi szczytów, odpowiedniego RAM ani akceptowalnej kolejki.
 
-R2 Standard ma w sprawdzonym cenniku 10 GB-miesiąca bezpłatnej przestrzeni, potem 0,015 USD/GB-miesiąc; operacje są rozliczane osobno z własnymi pulami. Dla przykładowych 108,3 GB koszt samej przestrzeni wynosi około 1,5 USD ponad pulę. Przy retencji 30 dni w stanie ustalonym byłoby to około 3 250 GB, czyli około 48,6 USD samej przestrzeni ponad pulę. Retencja robi większą różnicę niż przedwczesna optymalizacja kilku zapytań.
+R2 Standard miał w sprawdzonym cenniku 10 GB-miesiąca bezpłatnej przestrzeni,
+potem 0,015 USD/GB-miesiąc; operacje są rozliczane osobno. Przy powyższych
+25 GB koszt samej przestrzeni według tego założenia to około 0,23 USD ponad pulę.
+Cennik i rzeczywiste zużycie, szczególnie Pro bez limitu liczby analiz,
+trzeba potwierdzić przed wdrożeniem.
 
-Orientacyjny budżet infrastruktury małego pilota: 80-200 zł miesięcznie na VPS, niewielki storage, backup bazy i podstawowe usługi, plus prowizje płatnicze i ewentualny dostęp do narzędzia treningowego. To budżet planistyczny do potwierdzenia po benchmarku i wyborze ofert, nie gwarancja obsługi 1 000 graczy. Nie obejmuje pracy, wsparcia, księgowości, podatków ani akwizycji.
+Orientacyjny budżet niewielkiego wdrożenia: 80-200 zł miesięcznie na VPS, niewielki storage, backup bazy i podstawowe usługi, plus prowizje płatnicze i ewentualny dostęp do narzędzia treningowego. To budżet planistyczny do potwierdzenia po benchmarku i wyborze ofert, nie gwarancja obsługi 1 000 graczy. Nie obejmuje pracy, wsparcia, księgowości, podatków ani akwizycji.
 
-Przy hipotetycznej cenie 29 zł brutto i stawce VAT 23%, jeżeli taka stawka ma zastosowanie, zostaje około 23,58 zł przed prowizjami i innymi kosztami. 50 abonentów to około 1 179 zł przed tymi kosztami, nie utrzymanie pełnoetatowego twórcy. Nie mylić taniego hostingu z rentownym biznesem.
+Cena Pro to 7,99 USD miesięcznie. Koszt operatora płatności, ewentualnych podatków
+i infrastruktury nie został tutaj wyliczony; nie utożsamiać przychodu z zyskiem.
 
-Ograniczenia kosztowe: zamknięty nabór pilota, limity uploadu i liczby zadań, jedna aktywna analiza na użytkownika, mała globalna współbieżność oraz alarmy na zajętość dysku, błędy i długość kolejki. Nie wprowadzać nielimitowanego planu.
+Ograniczenia kosztowe: limit pliku 1 GiB, jedno aktywne zadanie na SteamID,
+jeden parser globalnie oraz alarmy RAM/dysku, błędów i wieku kolejki.
+Pro zgodnie z decyzją użytkownika nie ma limitu liczby analiz; nie dokładać
+ukrytej miesięcznej kwoty. Niezbędny jest pomiar i monitoring kosztów.
 
-## Walidacja produktu i monetyzacji
+## Moduł abonamentowy — kod i lokalny odbiór
 
-- Backend i UI powstają przed próbami w grze i płatnym pilotem. Po końcowym
-  odbiorze przygotować zweryfikowane paczki na własnych demach testerów;
-  nie rozszerzać portalu o funkcje spoza minimalnego przepływu.
-- Trenerów wykorzystać do oznaczania: użyteczny drill, nietrafna diagnoza, brakujący kontekst, niemożliwe odtworzenie. Powstaje materiał do ulepszania reguł.
-- Sprawdzać płatność za faktyczny pakiet i doświadczenie treningu, nie tylko deklarację „fajny pomysł”. Pierwszą ofertą może być jednorazowa paczka zamiast abonamentu.
-- Pomocnicze punkty odniesienia pilota: 20 testerów, połowa uruchamia pierwszy trening, 30% wraca do kolejnej sesji i 5 niezależnych osób płaci docelową cenę. Nie są to zatwierdzone progi go/no-go ani benchmarki rynku. Decyzję o skalowaniu i komercyjnym uruchomieniu podejmuje właściciel na podstawie potwierdzonego treningu, rzeczywistych płatności, kosztów i potrzebnego wsparcia; nie blokuje to implementacji BE/UI.
-- W pilocie potwierdzać uruchomienie treningu obserwacją lub dobrowolnym potwierdzeniem; nie uznawać pobrania pliku za wykonanie ćwiczenia.
-- ; Pro około 19-29 zł z uczciwym limitem, np. 40 analiz miesięcznie, historią, zapisanymi zestawami i kolejką powtórek. To propozycje do eksperymentu, nie zatwierdzone limity produktu.
-- Nie uzależniać pierwszego pełnego doświadczenia z automatycznym ustawieniem botów od płatności. Darmowa próba musi pozwolić ocenić główną wartość.
-- Jeśli gracz nie wraca do treningu, dodatkowy dashboard, LLM czy panel drużyny nie rozwiążą problemu.
+Zatwierdzony i zaimplementowany model: **Stripe Billing, 7,99 USD miesięcznie,
+bez limitu liczby analiz własnego SteamID**. Free: **3 analizy w miesiącu
+kalendarzowym UTC**. Nie ma jednorazowych pakietów, triala ani okresu tolerancji.
+
+Zakres `build-subscriptions`:
+
+- `BillingAccount` i minimalny `BillingEvent`; checkout i portal Stripe,
+  stała cena walidowana w API, powrót z checkoutu nie nadaje uprawnień.
+- Podpisane webhooki z tolerancją 300 sekund, unikalne ID zdarzeń i uzgodnienie
+  bieżącego stanu Stripe oraz opłaconego okresu faktury, również przy starszych
+  lub powtórzonych zdarzeniach. API odczytu: `2025-06-30.basil`.
+- Anulowanie w portalu na koniec opłaconego okresu. Nieudana odnowa nie przedłuża
+  Pro; po końcu opłaconego okresu wraca Free. Rozpoczęte zadania pozostają.
+- Przed usunięciem konta natychmiastowe anulowanie i wygaszenie checkoutów,
+  bez automatycznego zwrotu; awaria Stripe blokuje usunięcie. Zamknięta referencja
+  klienta bez właściciela pozwala obsłużyć i anulować opóźnione subskrypcje.
+- Miesięczna kwota Free i jej ewidencja do końca miesiąca UTC, bez resetu
+  po zmianie konta. Pro nie znosi ograniczeń technicznych.
+- Odświeżenie w UI i polecenie `reconcile_subscriptions`, także dla zamkniętych
+  referencji; okresowe uruchomienie trzeba skonfigurować operacyjnie.
+- Testy na PostgreSQL i atrapach Stripe, w tym podpisy, retry, współbieżność,
+  okres opłacony, kwoty, usuwanie i izolacja kont. Prawdziwy Checkout/portal/
+  webhook wymagają konfiguracji i osobnego odbioru, zgodnie z README.
+
+Nie ma etapu oceny przez trenera, badania powrotów użytkowników, płatnego pilota
+ani decyzji `approve-saas`. Deklarowane oceny użytkownika i powtórki zostają.
 
 ## Minimalna eksploatacja, dane i uprawnienia
 
@@ -483,6 +563,69 @@ Ograniczenia kosztowe: zamknięty nabór pilota, limity uploadu i liczby zadań,
 
 ## Todos i zależności
 
+### Rozszerzenie: siedem map turniejowych
+
+Status: **częściowo zaimplementowane: Mirage i Dust2**. Wspólny katalog
+`maps.py` jest używany przez parser, eksporter, paczki i prezentację map.
+Reguły `damage-window-v3`, raport v2 i scenariusze v1 pozostają bez zmian.
+Eksport Dust2 jest eksperymentalny i `unverified_in_game`; nie zamyka G1/G4.
+Zakończono lokalny odbiór Playwright obu map na syntetycznych raportach:
+historia, raporty, trening, neutralna mapa oczekującego zadania i powtórki,
+8 stron przy 1280 i 390 px, bez poziomego przepełnienia i wyjątków JavaScript.
+Sprawdzono nawigację, trwały wybór, pobrania i zawartość CFG/ZIP oraz zapis
+oceny w nadchodzących powtórkach. Lokalne kontenery przebudowano; dane
+testowe usunięto. Nie był to upload rzeczywistego dema przez przeglądarkę.
+Na HTTP działa ręczne zaznaczenie komend; API schowka wymaga osobnego
+potwierdzenia na docelowym HTTPS. Pełny odbiór R2/Steam/SMTP/Stripe pozostaje
+otwarty; szczegółowe dowody zapisano w protokole integracji.
+Prace mogą postępować niezależnie od przygotowania VPS; muszą zakończyć się
+przed końcowym aplikacyjnym E2E rozszerzonego zakresu.
+
+1. `support-tournament-maps`: jeden współdzielony katalog siedmiu map z nazwami
+   technicznymi i prezentacyjnymi; użycie w parserze, analizie, walidacji i CLI.
+   Zachować odrzucanie map spoza listy, limit 1 GiB, reguły SteamID i kwot.
+   Zweryfikować grupowanie względem właściwej mapy i wysokości, szczególnie
+   wielopoziomowego Nuke. Nie łączyć sytuacji z różnych map.
+2. `adapt-multi-map-training`: użyć tego samego katalogu w eksporterze, paczkach,
+   backendzie i UI; usunąć założenia i stałe etykiety Mirage. Raport, historia,
+   kolejka powtórek, komendy i instrukcja muszą wskazywać rzeczywistą mapę
+   i jej metadane. Nie przepisywać współdzielonego pipeline'u ani tworzyć
+   siedmiu niezależnych eksporterów.
+3. `verify-tournament-maps`: regresja wszystkich siedmiu map oraz uprawnione,
+   rzeczywiste demo każdej z nich przez upload → worker → raport → wybór →
+   eksport → ocenę/powtórkę. Syntetyczne fixture nie zastępują próby parsera.
+   Sprawdzić również nieobsługiwaną mapę, błędy wejścia, limity, usuwanie
+   i zachowanie istniejących raportów Mirage. Uprawnione lokalne demo Dust2
+   (build `10924`) przeszło analizę, porównanie migawki, eksport i proces
+   potomny workera; nie jest to próba rzeczywistych usług R2/Steam.
+4. W ramach `prove-scenario-import` odebrać w Yprac jedną i następnie 10 sytuacji
+   **na każdej mapie**, z jej własną referencją, rewizją, geometrią i pomiarami.
+   Cache i pozostałe mapy nie są domyślnie uznane za dostępne w Yprac.
+   Brak mapy lub zgodnej rewizji zapisać jako `blocked`, bez podmiany na Mirage
+   ani inną integrację. Status potwierdzenia utrzymywać osobno dla każdej mapy;
+   nie podnosić go zbiorczo po odbiorze tylko Mirage.
+
+**Aktualny punkt kontynuacji:** backend, UI Tactical HUD, deklarowane powtórki
+i Stripe Billing są zaimplementowane i odebrane lokalnie. Etap Dust2 wraz
+z analizą rzeczywistego dema i lokalnym Playwright jest zakończony; nie wracać
+do jego implementacji ani uznawać go za pełny odbiór siedmiu map. Free to 3 analizy
+na miesiąc kalendarzowy UTC, Pro to 7,99 USD/mies. bez limitu liczby analiz
+własnego SteamID. Brakuje produkcyjnej warstwy
+operacyjnej oraz odbiorów w prawdziwym środowisku, nie kolejnego frontendu
+ani ponownej implementacji eksportera.
+
+Najbliższy etap to operacyjna część `add-operations-and-billing`:
+docelowy odbiór `prepare-deployment` (konfiguracja Caddy/TLS/statyków i lokalny
+Compose są już gotowe; pozostają VPS, publiczny ACME i timer), następnie odbiór
+R2/Steam/SMTP, runtime workera Linux, backup/odtworzenie, monitoring i pomiary
+docelowego VPS. `build-subscriptions` ma kod i lokalny odbiór; skonfigurować
+i odebrać prawdziwy Stripe. Po nich aplikacyjne E2E z abonamentem,
+a na końcu jedna i 10 sytuacji na każdej z siedmiu map w CS2/Yprac.
+Szczegółowy zakres i mierzalne warunki zakończenia są w
+[„Co jeszcze brakuje”](implementation-todos.md#co-jeszcze-brakuje--wdrożenie-i-odbiory).
+Miesięczny abonament jest zatwierdzonym zakresem. Nie dodajemy pilota biznesowego,
+oceny trenerów ani osobnej bramki walidacji SaaS.
+
 Statusy odnoszą się do rzeczywistego wykonania, nie do samego istnienia planu.
 Zadania bez zależności mogą postępować niezależnie; kolejność w tabeli nie dodaje
 ukrytych zależności.
@@ -490,37 +633,41 @@ ukrytych zależności.
 | Zadanie | Status | Pozostały zakres / warunek odbioru | Zależności |
 |---|---|---|---|
 | `bootstrap-cli` | Gotowe | Fundament, kontrakt, walidator, testy, CI i Docker są opisane powyżej | Brak |
-| `benchmark-demo-pipeline` | Częściowo gotowe | Kod i pomiary lokalne gotowe; pozostały ręczne referencje/ocena trenera, przypadki z docelowych dem i benchmark na docelowej klasie VPS wraz z doborem limitów | `bootstrap-cli`; niezależne od eksportera |
+| `benchmark-demo-pipeline` | Częściowo gotowe | Kod i pomiary lokalne gotowe; pozostał techniczny benchmark na docelowej klasie VPS wraz z doborem limitów; bez oceny trenera | `bootstrap-cli`; niezależne od eksportera |
 | `build-training-exporter` | Gotowy prototyp; bez odbioru w grze | Indeksy gracza i encji `2` są osobnymi hipotezami; `point_teleport` próbuje odtworzyć orientację; oczy/gotowość/kolejność do G1; walidacja i regresja gotowe | `bootstrap-cli`; bez G1 |
 | `assemble-training-packs` | Gotowe — CLI/logika BE | Wybór/odrzucanie, osobne TXT/CFG, ZIP, manifest, instrukcja; współdzielone funkcje, brak nadpisywania; wszystko `unverified_in_game` | `build-training-exporter` |
-| `define-saas-policies` | Gotowe | R2, e-mail + Steam, 3 dema/7 dni na SteamID, jednorazowa analiza, usuwanie dem i prywatna historia do usunięcia przez użytkownika | `bootstrap-cli` |
+| `define-saas-policies` | Gotowe; kwota zaktualizowana | R2, e-mail + Steam, Free 3 analizy/miesiąc UTC na SteamID, Pro 7,99 USD/mies. bez limitu liczby, jednorazowa analiza i usuwanie dem | `bootstrap-cli` |
 | `build-minimal-web` | Kod, poprawki i review gotowe; integracje do odbioru | Django/PostgreSQL, R2, Q2, kwoty, worker i reaper istnieją; do próby prawdziwe R2/Steam/SMTP, migracja profili, kontener Linux/Compose i sizing VPS | `define-saas-policies` |
 | `complete-training-backend` | Kod i lokalny odbiór gotowe | Zapamiętany wybór/odrzucenia, autoryzowany ZIP na żądanie i komendy/CFG z raportu, bez ponownej analizy; migracja `0003_training_selection`; zewnętrzny odbiór fundamentu G2 nadal otwarty | `build-minimal-web`, `assemble-training-packs` |
-| `build-training-ui` | Nierozpoczęte; następny krok | Szablony Django, opcjonalnie HTMX: konta/Steam, upload, status, raport, zapamiętany wybór scenariuszy, kopiowanie ustawienia, opcjonalny ZIP i obsługa błędów | `complete-training-backend` |
-| `wire-personal-training` | Nierozpoczęte; G3 | Połączyć UI z backendem, bezpiecznymi paczkami i deklarowanymi ocenami/powtórkami; automatyczne testy aplikacji | `build-training-ui` |
-| `add-operations-and-billing` | Po aplikacji, przed odbiorem | Compose/TLS, retencja i usuwanie, backup/odtworzenie, monitoring i limity zasobów; automatyczny abonament nadal tylko po osobnej decyzji | `wire-personal-training` |
-| `verify-end-to-end-pilot` | Końcowy etap aplikacyjny | Test upload → raport → paczka → kopiowanie, błędy/retry/limity, uprawnienia, usuwanie, odtworzenie bazy i koszty; bez deklarowania wyniku w grze | `wire-personal-training`, `add-operations-and-billing` |
-| `prove-scenario-import` | Odłożone na końcowy odbiór; G1 otwarte | Po BE i UI wykonać próbę jednej i 10 sytuacji w CS2/Yprac: indeks/gotowość bota, XYZ, oczy, broń, mapa, restart i jedno wklejenie; poprawić wykryte problemy; G1 i końcowy G4 | `verify-end-to-end-pilot` |
-| `validate-paid-training` | Po końcowym odbiorze | Prywatny pilot: potwierdzone treningi, powroty, płatności, opinie i koszt obsługi; liczby pomocnicze nie są sztywnymi progami | `prove-scenario-import`, `benchmark-demo-pipeline` |
-| `approve-saas` | Decyzja o uruchomieniu/skalowaniu, nie o rozpoczęciu kodowania | Jawna decyzja właściciela na podstawie treningu, płatności i kosztów | `validate-paid-training` |
-| `launch-controlled-saas` | Po końcowym odbiorze i decyzji biznesowej | Zamknięty nabór z limitami, zweryfikowaną integracją i procedurą wyłączenia wadliwego eksportu | `approve-saas` |
+| `build-training-ui` | Kod i lokalny odbiór gotowe | Szablony Tactical HUD, konta/Steam, upload/status, raport, wybór, kopiowanie, opcjonalne ZIP/CFG i jawne błędy; zewnętrzny odbiór do wykonania | `complete-training-backend` |
+| `wire-personal-training` | Kod i lokalny odbiór gotowe; aplikacyjne G3 | Deklarowane oceny, terminy 1/3/7 dni i przywracanie, prywatna stronicowana kolejka; migracja `0004_practicereview`; bez wyników mierzonych w grze | `build-training-ui` |
+| `support-tournament-maps` | Częściowe: Mirage/Dust2 | Wspólny katalog i pipeline dla dwóch map; Cache/Inferno/Nuke/Ancient/Anubis nadal poza listą obsługi | `bootstrap-cli` |
+| `adapt-multi-map-training` | Częściowe: Mirage/Dust2 | Eksporter, paczki i UI używają rzeczywistej mapy; paczki mieszane opisują mapę każdego pliku, starsze raporty Mirage pozostają obsługiwane | `support-tournament-maps`, `complete-training-backend`, `wire-personal-training` |
+| `verify-tournament-maps` | Częściowe | Regresja Mirage/Dust2, rzeczywisty parser/proces potomny/eksport Dust2 i syntetyczny Playwright desktop/mobile zaliczone; pełny upload/prawdziwe usługi i pozostałe mapy do odbioru, bez uznawania tego za odbiór gry | `adapt-multi-map-training` |
+| `add-operations-and-billing` | Częściowo gotowe — billing i konfiguracja wdrożeniowa w kodzie | Pozostały odbiór VPS/publicznego TLS i Stripe, backup/odtworzenie, monitoring i dobór limitów | `wire-personal-training` |
+| `prepare-deployment` | Konfiguracja i lokalny odbiór gotowe; VPS do odbioru | Caddy, statyki w obrazie, host/origin, migracje, HTTPS/logowanie/CSRF i restart sprawdzone lokalnie z testowym CA i atrapą R2; pozostały publiczny ACME, instalacja timera i odbiór po restarcie hosta | `wire-personal-training` |
+| `build-subscriptions` | Kod i lokalny odbiór; Stripe do konfiguracji | Stripe 7,99 USD/mies., Pro bez limitu analiz własnego SteamID, Free 3/miesiąc UTC; checkout/portal, webhooki, uzgodnienie stanu i anulowanie przy usunięciu; migracja `0005_billing_accounts` | `wire-personal-training` |
+| `verify-live-stripe` | Konfiguracja i odbiór do wykonania | Rzeczywisty Checkout, portal, webhooki i cykl abonamentu; test mode przed live oraz okresowe `reconcile_subscriptions` | `build-subscriptions`, `prepare-deployment` |
+| `verify-application-e2e` | Końcowy odbiór aplikacyjny | Upload → raport → eksport → ocena/powtórka dla siedmiu map oraz subskrypcja, płatności, limity, błędy, usuwanie i odtworzenie; bez pilota biznesowego | `verify-tournament-maps`, `wire-personal-training`, `add-operations-and-billing`, `build-subscriptions` |
+| `prove-scenario-import` | Odłożone na końcowy odbiór; G1 otwarte | Po aplikacyjnym E2E jedna i 10 sytuacji na każdej z siedmiu map w CS2/Yprac: indeks/gotowość bota, XYZ, oczy, broń, geometria, powtórzenie i jedno wklejenie; dowody per mapa | `verify-application-e2e` |
 
 Bieżące MVP obejmuje backend i UI, następnie końcowy odbiór w grze.
 CLI pozostaje narzędziem deweloperskim i alternatywnym sposobem użycia
-wspólnej logiki. Oceny i prosta kolejka powtórek nie są jeszcze zaimplementowane.
+wspólnej logiki. Oceny i prosta kolejka powtórek są deklaracjami użytkownika,
+nie telemetrią z CS2.
 
 ### Bramki przejścia
 
 | Bramka | Wymagany dowód | Obecny stan |
 |---|---|---|
 | G2: backend | Eksporter, paczki, upload, powiązany gracz, analiza i prywatne wyniki połączone; automatyczne testy BE i jawny status zgodności | Kod fundamentu i backendu treningowego gotowy, w tym zapis wyboru i eksporty WWW; lokalny odbiór na PostgreSQL zaliczony, usługi zewnętrzne i kontener workera nadal do odbioru |
-| G3: UI i aplikacja | Przepływ od uploadu do kopiowania komend, wybór/odrzucanie sytuacji, deklarowane oceny/powtórki i testy UI | Do wykonania po BE; nie wymaga wcześniejszych płatności ani próby w grze |
-| G1: integracja w grze — po G2/G3 | Jedno wklejenie automatycznie ustawia i powtarza 10 sytuacji w CS2/Yprac; pozycje, oczy, broń i mapa zgodne z protokołem | Odłożone na koniec; poprawność komend przyjęta roboczo, brak dowodu runtime |
-| G4: końcowy odbiór MVP | G2, G3, aplikacyjne E2E i pozytywne G1; sprawdzone błędy/retry, limity, uprawnienia, retencja, odtworzenie bazy i zasoby | Do wykonania po BE/UI; przed deklarowaniem zweryfikowanego treningu |
+| G3: UI i aplikacja | Przepływ od uploadu do kopiowania komend, wybór/odrzucanie sytuacji, deklarowane oceny/powtórki i testy UI | Kod i lokalny odbiór PostgreSQL/przeglądarki gotowe na syntetycznych danych; odbiór w docelowym środowisku nadal wymagany |
+| G1: integracja w grze — po G2/G3 | Jedno wklejenie automatycznie ustawia i powtarza 10 sytuacji na każdej z siedmiu map w CS2/Yprac; pozycje, oczy, broń i geometria zgodne z protokołem, wyniki per mapa | Odłożone na koniec; poprawność komend przyjęta roboczo, brak dowodu runtime |
+| G4: końcowy odbiór MVP | G2, G3, aplikacyjne E2E z abonamentem i pozytywne G1; błędy/retry, płatności, limity, uprawnienia, retencja, odtworzenie i zasoby | Do wykonania; odbiór techniczny aplikacji, nie pilot biznesowy |
 
 Historyczne numery G1–G4 zachowano dla odnośników. Aktualna kolejność to
-G2 → G3 → końcowe próby G1 → G4. Płatny pilot i decyzja o skalowaniu
-są osobnymi zadaniami po odbiorze, nie wcześniejszą bramką implementacji.
+G2 → G3 → końcowe próby G1 → G4. Moduł abonamentowy jest częścią aplikacji
+przed końcowym odbiorem. Pilot biznesowy i oceny trenerów są poza zakresem.
 
 Nie planować odrębnych implementacji trzech integracji ani panelu drużynowego, dopóki pierwszy przepływ nie spełnia kryteriów.
 
@@ -549,6 +696,6 @@ Nie planować odrębnych implementacji trzech integracji ani panelu drużynowego
 
 ## Decyzja architektoniczna w jednym zdaniu
 
-Jeden Pythonowy monolit Django z workerem, jedna mapa i jedna integracja Yprac:
+Jeden Pythonowy monolit Django z workerem, siedem map i jedna integracja Yprac:
 najpierw backend na zaakceptowanych założeniach komend, potem UI, a na końcu
 próby w CS2/Yprac i poprawki przed udostępnieniem zweryfikowanego treningu.
