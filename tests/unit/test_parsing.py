@@ -1,3 +1,7 @@
+from types import SimpleNamespace
+from unittest.mock import Mock
+
+import polars as pl
 import pytest
 
 from cs_map_trainer.maps import SUPPORTED_MAPS
@@ -46,8 +50,6 @@ def test_size_limit_is_enforced_before_decoding(tmp_path, monkeypatch):
 
 @pytest.mark.parametrize("map_name", [*SUPPORTED_MAPS, "de_inferno", "de_nuke", "de_unknown"])
 def test_map_support_comes_from_demo_header(tmp_path, monkeypatch, map_name):
-    from types import SimpleNamespace
-
     path = tmp_path / "misleading-dust2-name.dem"
     path.write_bytes(b"PBDEMS2\x00")
     monkeypatch.setattr(
@@ -62,3 +64,58 @@ def test_map_support_comes_from_demo_header(tmp_path, monkeypatch, map_name):
     else:
         with pytest.raises(DemoError, match="de_mirage, de_dust2"):
             DemoReader(path)
+
+
+def reader_with_native_data(tmp_path, monkeypatch, frame):
+    native = SimpleNamespace(
+        header={"map_name": "de_dust2", "build_num": 123}, ticks=Mock(return_value=frame)
+    )
+    path = tmp_path / "native.dem"
+    path.write_bytes(b"PBDEMS2\x00")
+    monkeypatch.setattr("cs_map_trainer.parsing.Demo", lambda path: native)
+    return DemoReader(path), native
+
+
+def test_locations_use_raw_awpy_property_and_exact_ticks_only(tmp_path, monkeypatch):
+    reader, native = reader_with_native_data(
+        tmp_path,
+        monkeypatch,
+        pl.DataFrame(
+            {
+                "tick": [98, 99, 99, 120],
+                "steamid": [1, 1, 2, 1],
+                "m_szLastPlaceName": ["Previous", "BombsiteA", "CTSpawn", "Death"],
+                "unrequested": [0, 0, 0, 0],
+            }
+        ),
+    )
+    frame = reader.locations([99])
+    native.ticks.assert_called_once_with(props=["m_szLastPlaceName"], players_only=True)
+    assert frame.to_dicts() == [
+        {"tick": 99, "steamid": 1, "last_place_name": "BombsiteA"},
+        {"tick": 99, "steamid": 2, "last_place_name": "CTSpawn"},
+    ]
+
+
+def test_empty_location_request_does_not_scan_the_demo(tmp_path, monkeypatch):
+    reader, native = reader_with_native_data(tmp_path, monkeypatch, pl.DataFrame())
+    assert reader.locations([]).columns == ["tick", "steamid", "last_place_name"]
+    native.ticks.assert_not_called()
+
+
+@pytest.mark.parametrize("missing", ["tick", "steamid", "m_szLastPlaceName"])
+def test_missing_native_location_columns_fail_explicitly(tmp_path, monkeypatch, missing):
+    frame = pl.DataFrame({"tick": [99], "steamid": [1], "m_szLastPlaceName": ["CTSpawn"]})
+    reader, _ = reader_with_native_data(tmp_path, monkeypatch, frame.drop(missing))
+    with pytest.raises(DemoError, match="missing required columns"):
+        reader.locations([99])
+
+
+@pytest.mark.parametrize("name", [None, ""])
+def test_absent_native_values_remain_absent_instead_of_guessing(tmp_path, monkeypatch, name):
+    frame = pl.DataFrame(
+        {"tick": [99], "steamid": [1], "m_szLastPlaceName": [name]},
+        schema={"tick": pl.Int64, "steamid": pl.UInt64, "m_szLastPlaceName": pl.String},
+    )
+    reader, _ = reader_with_native_data(tmp_path, monkeypatch, frame)
+    assert reader.locations([99])["last_place_name"].to_list() == [name]

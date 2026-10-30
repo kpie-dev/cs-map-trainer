@@ -2,7 +2,6 @@ import json
 import os
 import subprocess
 import sys
-import time
 import uuid
 from concurrent.futures import ThreadPoolExecutor
 from datetime import timedelta
@@ -12,19 +11,17 @@ from unittest.mock import Mock, patch
 
 import pytest
 from allauth.account.models import EmailAddress
-from allauth.core.exceptions import ImmediateHttpResponse
-from allauth.socialaccount.models import SocialAccount, SocialLogin
+from allauth.socialaccount.models import SocialAccount
 from botocore.exceptions import ClientError
 from botocore.response import StreamingBody
 from django.contrib.auth import get_user_model
 from django.core import mail
 from django.db import IntegrityError, close_old_connections, transaction
-from django.test import Client, RequestFactory
+from django.test import Client
 from django.utils import timezone
 
 from cs_map_trainer.web import services, tasks
-from cs_map_trainer.web.identity import SteamAdapter
-from cs_map_trainer.web.models import SteamIdentity, Upload
+from cs_map_trainer.web.models import AccountPreferences, Upload
 from cs_map_trainer.web.storage import R2, InvalidUpload
 
 pytestmark = pytest.mark.django_db
@@ -33,49 +30,51 @@ STEAM = "76561198000000001"
 
 def test_initiation_idempotent_and_conflicting_size(user, storage):
     request_id = uuid.uuid4()
-    upload = services.initiate(user, request_id, 32, storage)
-    assert services.initiate(user, request_id, 32, storage).pk == upload.pk
+    upload = services.initiate(user, request_id, 32, "76561198000000001", storage)
+    assert services.initiate(user, request_id, 32, "76561198000000001", storage).pk == upload.pk
     assert Upload.objects.count() == 1
     storage.begin.assert_called_once()
     with pytest.raises(services.IntakeError, match="idempotency_conflict"):
-        services.initiate(user, request_id, 33, storage)
+        services.initiate(user, request_id, 33, "76561198000000001", storage)
 
 
 @pytest.mark.parametrize("size", [0, 7, 1024**3 + 1, True, None, "20"])
 def test_invalid_technical_sizes(user, storage, size):
     with pytest.raises(services.IntakeError, match="invalid_demo_size"):
-        services.initiate(user, uuid.uuid4(), size, storage)
+        services.initiate(user, uuid.uuid4(), size, "76561198000000001", storage)
     storage.begin.assert_not_called()
 
 
-def test_three_uploads_per_steam_calendar_month(user, storage):
+def test_three_uploads_per_account_calendar_month(user, storage):
     for _ in range(3):
-        item = services.initiate(user, uuid.uuid4(), 32, storage)
+        item = services.initiate(user, uuid.uuid4(), 32, "76561198000000001", storage)
         Upload.objects.filter(pk=item.pk).update(
             state=Upload.State.UNSUPPORTED, cleanup_pending=False
         )
     with pytest.raises(services.IntakeError, match="monthly_demo_limit"):
-        services.initiate(user, uuid.uuid4(), 32, storage)
+        services.initiate(user, uuid.uuid4(), 32, "76561198000000001", storage)
     oldest = Upload.objects.order_by("created_at").first()
     Upload.objects.filter(pk=oldest.pk).update(
         created_at=services.month_start() - timedelta(microseconds=1)
     )
-    assert services.initiate(user, uuid.uuid4(), 32, storage)
+    assert services.initiate(user, uuid.uuid4(), 32, "76561198000000001", storage)
 
 
 def test_one_active_upload(user, storage, upload):
     with pytest.raises(services.IntakeError, match="active_upload_exists"):
-        services.initiate(user, uuid.uuid4(), 32, storage)
+        services.initiate(user, uuid.uuid4(), 32, "76561198000000001", storage)
 
 
 @pytest.mark.django_db(transaction=True)
-def test_concurrent_intake_is_serialized_by_steam(user, storage):
+def test_concurrent_intake_is_serialized_by_account(user, storage):
     def start(_):
         close_old_connections()
         try:
             owner = get_user_model().objects.get(pk=user.pk)
             try:
-                return str(services.initiate(owner, uuid.uuid4(), 32, storage).pk)
+                return str(
+                    services.initiate(owner, uuid.uuid4(), 32, "76561198000000001", storage).pk
+                )
             except services.IntakeError as error:
                 return error.code
         finally:
@@ -87,17 +86,25 @@ def test_concurrent_intake_is_serialized_by_steam(user, storage):
     assert Upload.objects.count() == 1
 
 
-def test_unique_identity_and_active_constraints(user, upload):
-    other = get_user_model().objects.create_user("other")
-    with transaction.atomic(), pytest.raises(IntegrityError):
-        SteamIdentity.objects.create(steam_id=STEAM, owner=other)
+def test_unique_request_and_active_constraints(user, upload):
     with transaction.atomic(), pytest.raises(IntegrityError):
         Upload.objects.create(
             owner=user,
-            identity=upload.identity,
+            player_steam_id=upload.player_steam_id,
             request_id=uuid.uuid4(),
             size_bytes=32,
             key="other.dem",
+            expires_at=upload.expires_at,
+        )
+    Upload.objects.filter(pk=upload.pk).update(state="ready")
+    with transaction.atomic(), pytest.raises(IntegrityError):
+        Upload.objects.create(
+            owner=user,
+            player_steam_id=STEAM,
+            request_id=upload.request_id,
+            size_bytes=32,
+            key="duplicate.dem",
+            state="ready",
             expires_at=upload.expires_at,
         )
 
@@ -358,7 +365,7 @@ def test_account_delete_clears_history_but_preserves_quota_tombstone(api, user, 
     assert upload.owner_id is None
     assert upload.report is None
     assert upload.quota_charged
-    assert SteamIdentity.objects.get(pk=STEAM).owner_id is None
+    assert not AccountPreferences.objects.exists()
     assert not get_user_model().objects.filter(pk=user.pk).exists()
 
 
@@ -367,15 +374,14 @@ def test_account_deletion_blocks_during_active_attempt(user, upload):
         services.delete_account(user)
 
 
-def test_verified_email_and_steam_are_required(client, user, storage):
+def test_only_verified_email_is_required(client, user, storage):
     assert client.get("/backend/history/").status_code == 403
     client.force_login(user)
     EmailAddress.objects.filter(user=user).update(verified=False)
     assert client.get("/backend/history/").status_code == 403
     EmailAddress.objects.filter(user=user).update(verified=True)
-    SteamIdentity.objects.filter(owner=user).delete()
-    with pytest.raises(services.IntakeError, match="verified_steam_required"):
-        services.initiate(user, uuid.uuid4(), 32, storage)
+    assert client.get("/backend/history/").status_code == 200
+    assert services.initiate(user, uuid.uuid4(), 32, STEAM, storage)
 
 
 def test_csrf_required_for_intake(user):
@@ -386,7 +392,7 @@ def test_csrf_required_for_intake(user):
     )
 
 
-def test_intake_ignores_client_steam_id(api, storage):
+def test_intake_uses_client_player_steam_id(api, storage):
     with patch("cs_map_trainer.web.views.R2", return_value=storage):
         response = api.post(
             "/backend/uploads/",
@@ -394,12 +400,13 @@ def test_intake_ignores_client_steam_id(api, storage):
                 "request_id": str(uuid.uuid4()),
                 "size_bytes": 32,
                 "has_upload_rights": True,
-                "steam_id": "76561198000000009",
+                "player_steam_id": "76561198000000009",
             },
             content_type="application/json",
         )
     assert response.status_code == 201
-    assert Upload.objects.get().identity_id == STEAM
+    assert Upload.objects.get().player_steam_id == "76561198000000009"
+    assert response.json()["player_steam_id"] == "76561198000000009"
     assert response.json()["method"] == "PUT"
 
 
@@ -428,42 +435,14 @@ def test_public_registration_sends_verification_email(client):
 
 def test_login_template_and_steam_routes(client, api):
     assert Client().get("/accounts/login/").status_code == 200
-    assert api.get("/accounts/steam/login/").status_code == 405
-    assert (
-        api.get(
-            "/accounts/steam/login/callback/",
-            {
-                "openid.op_endpoint": "http://127.0.0.1/private",
-            },
-        ).status_code
-        == 400
-    )
-    assert api.get("/accounts/openid/login/").status_code == 404
-
-
-def test_steam_adapter_rejects_account_switch(user):
-    other = get_user_model().objects.create_user("another", "another@example.test")
-    EmailAddress.objects.create(user=other, email=other.email, verified=True)
-    request = RequestFactory().get("/")
-    request.user = other
-    login = SocialLogin(account=SocialAccount(provider="steam", uid=STEAM))
-    login.state = {"process": "connect"}
-    with pytest.raises(ImmediateHttpResponse) as error:
-        SteamAdapter().pre_social_login(request, login)
-    assert error.value.response.status_code == 409
-
-
-def test_steam_adapter_only_connects_verified_user(user):
-    SteamIdentity.objects.all().delete()
-    request = RequestFactory().get("/")
-    request.user = user
-    login = SocialLogin(account=SocialAccount(provider="steam", uid=STEAM))
-    login.state = {"process": "login"}
-    with pytest.raises(ImmediateHttpResponse):
-        SteamAdapter().pre_social_login(request, login)
-    login.state = {"process": "connect"}
-    SteamAdapter().pre_social_login(request, login)
-    assert SteamIdentity.objects.get(pk=STEAM).owner == user
+    for path in [
+        "/accounts/steam/login/",
+        "/accounts/steam/login/callback/",
+        "/accounts/openid/login/",
+        "/accounts/social/connections/",
+    ]:
+        assert api.get(path).status_code == 404
+        assert api.post(path, {"process": "connect"}).status_code == 404
 
 
 def test_signed_part_binds_actual_content_length(upload):
@@ -474,6 +453,29 @@ def test_signed_part_binds_actual_content_length(upload):
     assert "content-length" in query["X-Amz-SignedHeaders"][0].split(";")
     assert query["partNumber"] == ["1"]
     assert query["uploadId"] == [upload.multipart_id]
+
+
+def test_signed_part_uses_public_endpoint_without_changing_backend(upload, settings):
+    from urllib.parse import parse_qs, urlparse
+
+    settings.R2_ENDPOINT = "http://storage:5000"
+    settings.R2_PUBLIC_ENDPOINT = "http://localhost:5001"
+    storage = R2()
+    url = urlparse(storage.sign(upload))
+    assert storage.client.meta.endpoint_url == "http://storage:5000"
+    assert storage.upload_client.meta.endpoint_url == "http://localhost:5001"
+    assert url.netloc == "localhost:5001"
+    assert url.path == f"/{settings.R2_BUCKET}/{upload.key}"
+    query = parse_qs(url.query)
+    assert "content-length" in query["X-Amz-SignedHeaders"][0].split(";")
+    assert query["uploadId"] == [upload.multipart_id]
+    assert query["partNumber"] == ["1"]
+
+
+def test_signing_defaults_to_backend_endpoint(settings):
+    settings.R2_PUBLIC_ENDPOINT = ""
+    storage = R2()
+    assert storage.upload_client is storage.client
 
 
 @pytest.mark.parametrize("parts", [[], [{"PartNumber": 1, "Size": 33, "ETag": "x"}]])
@@ -550,13 +552,13 @@ def test_expired_account_tombstone_is_removed_only_after_window(
     services.delete_account(user)
     with patch.object(tasks, "R2", return_value=storage):
         tasks.maintain()
-    assert SteamIdentity.objects.filter(pk=STEAM).exists()
+    assert Upload.objects.filter(pk=upload.pk).exists()
     Upload.objects.filter(pk=upload.pk).update(
         created_at=services.month_start() - timedelta(microseconds=1)
     )
     with patch.object(tasks, "R2", return_value=storage):
         tasks.maintain()
-    assert not SteamIdentity.objects.filter(pk=STEAM).exists()
+    assert not Upload.objects.filter(pk=upload.pk).exists()
 
 
 def test_completed_history_does_not_expire(user, upload, storage, settings, tmp_path):
@@ -572,18 +574,6 @@ def test_completed_history_does_not_expire(user, upload, storage, settings, tmp_
     upload.refresh_from_db()
     assert upload.report == {"saved": True}
     assert upload.scripts == [{"console_line": "saved"}]
-
-
-def test_steam_callback_rejects_untrusted_claimed_identity(api):
-    response = api.get(
-        "/accounts/steam/login/callback/",
-        {
-            "openid.op_endpoint": "https://steamcommunity.com/openid/login",
-            "openid.claimed_id": "http://127.0.0.1/private",
-            "openid.identity": "http://127.0.0.1/private",
-        },
-    )
-    assert response.status_code == 400
 
 
 def test_complete_invalid_recovered_object_returns_explicit_error(user, upload, storage):
@@ -604,60 +594,9 @@ def test_real_orm_queue_dispatch_is_persistent(upload):
     assert OrmQ.objects.count() == 1
 
 
-def test_steam_response_cannot_create_second_identity_for_account(user):
-    request = RequestFactory().get("/")
-    request.user = user
-    login = SocialLogin(account=SocialAccount(provider="steam", uid="76561198000000009"))
-    login.state = {"process": "connect"}
-    with pytest.raises(ImmediateHttpResponse) as error:
-        SteamAdapter().pre_social_login(request, login)
-    assert error.value.response.status_code == 409
-
-
-def test_steam_callback_requires_session_state_and_rejects_replay(api, user):
-    from allauth.socialaccount.providers.openid.views import OpenIDCallbackView
-    from allauth.socialaccount.providers.steam.provider import SteamOpenIDProvider
-
-    callback = {
-        "openid.op_endpoint": "https://steamcommunity.com/openid/login",
-        "openid.claimed_id": f"https://steamcommunity.com/openid/id/{STEAM}",
-        "openid.identity": f"https://steamcommunity.com/openid/id/{STEAM}",
-    }
-
-    def login(*args):
-        return SocialLogin(account=SocialAccount(provider="steam", uid=STEAM))
-
-    with (
-        patch.object(
-            OpenIDCallbackView,
-            "get_openid_response",
-            return_value=SimpleNamespace(status="success"),
-        ),
-        patch.object(SteamOpenIDProvider, "sociallogin_from_response", side_effect=login),
-    ):
-        assert api.get("/accounts/steam/login/callback/", callback).status_code == 403
-        session = api.session
-        session["socialaccount_states"] = {
-            "test-nonce": [{"process": "connect"}, time.time(), "steam"],
-        }
-        session.save()
-        assert api.get("/accounts/steam/login/callback/", callback).status_code == 302
-        assert SocialAccount.objects.get(provider="steam", uid=STEAM).user == user
-        assert api.get("/accounts/steam/login/callback/", callback).status_code == 403
-
-
-def test_openid_nonce_is_single_use():
-    from allauth.socialaccount.providers.openid.utils import DBOpenIDStore
-
-    store = DBOpenIDStore()
-    now = int(time.time())
-    assert store.useNonce("https://steamcommunity.com/openid/login", now, "synthetic-nonce")
-    assert not store.useNonce("https://steamcommunity.com/openid/login", now, "synthetic-nonce")
-
-
 def test_monthly_limit_counts_acceptance_not_an_older_reservation(user, storage):
     for _ in range(3):
-        item = services.initiate(user, uuid.uuid4(), 32, storage)
+        item = services.initiate(user, uuid.uuid4(), 32, "76561198000000001", storage)
         Upload.objects.filter(pk=item.pk).update(
             state=Upload.State.READY,
             cleanup_pending=False,
@@ -665,7 +604,7 @@ def test_monthly_limit_counts_acceptance_not_an_older_reservation(user, storage)
             accepted_at=timezone.now(),
         )
     with pytest.raises(services.IntakeError, match="monthly_demo_limit"):
-        services.initiate(user, uuid.uuid4(), 32, storage)
+        services.initiate(user, uuid.uuid4(), 32, "76561198000000001", storage)
 
 
 def test_missing_linked_player_is_explicit_and_charged(upload, storage, settings, tmp_path):
@@ -710,6 +649,7 @@ def test_upload_to_persistent_private_commands_flow(
                 "request_id": str(uuid.uuid4()),
                 "size_bytes": 32,
                 "has_upload_rights": True,
+                "player_steam_id": STEAM,
             },
             content_type="application/json",
         )
@@ -752,9 +692,9 @@ def test_new_upload_waits_until_previous_input_was_deleted(user, upload, storage
         state=Upload.State.FAILED, quota_charged=False, cleanup_pending=True
     )
     with pytest.raises(services.IntakeError, match="input_cleanup_pending"):
-        services.initiate(user, uuid.uuid4(), 32, storage)
+        services.initiate(user, uuid.uuid4(), 32, "76561198000000001", storage)
     Upload.objects.filter(pk=upload.pk).update(cleanup_pending=False)
-    assert services.initiate(user, uuid.uuid4(), 32, storage)
+    assert services.initiate(user, uuid.uuid4(), 32, "76561198000000001", storage)
 
 
 def test_busy_inherited_parser_slot_leaves_upload_queued(upload, storage, settings, tmp_path):
@@ -768,109 +708,6 @@ def test_busy_inherited_parser_slot_leaves_upload_queued(upload, storage, settin
     assert upload.state == Upload.State.QUEUED
     assert upload.started_at is None
     storage.download.assert_not_called()
-
-
-@pytest.mark.parametrize("existing", [False, True])
-def test_steam_profile_is_minimal_at_every_save(api, user, existing):
-    from allauth.socialaccount.providers.openid.views import OpenIDCallbackView
-    from allauth.socialaccount.providers.steam.provider import SteamOpenIDProvider
-    from django.db.models.signals import post_save
-
-    if existing:
-        SocialAccount.objects.create(
-            user=user,
-            provider="steam",
-            uid=STEAM,
-            extra_data={"steamid": STEAM, "personaname": "synthetic-old-name"},
-        )
-    saved = []
-
-    def record(sender, instance, **kwargs):
-        saved.append(instance.extra_data.copy())
-
-    session = api.session
-    session["socialaccount_states"] = {
-        "test-nonce": [{"process": "connect"}, time.time(), "steam"],
-    }
-    session.save()
-    response_login = SocialLogin(
-        account=SocialAccount(
-            provider="steam",
-            uid=STEAM,
-            extra_data={
-                "steamid": STEAM,
-                "personaname": "synthetic-new-name",
-                "realname": "synthetic-private-field",
-            },
-        )
-    )
-    post_save.connect(record, sender=SocialAccount)
-    try:
-        with (
-            patch.object(
-                OpenIDCallbackView,
-                "get_openid_response",
-                return_value=SimpleNamespace(status="success"),
-            ),
-            patch.object(
-                SteamOpenIDProvider, "sociallogin_from_response", return_value=response_login
-            ),
-        ):
-            response = api.get(
-                "/accounts/steam/login/callback/",
-                {
-                    "openid.op_endpoint": "https://steamcommunity.com/openid/login",
-                    "openid.claimed_id": f"https://steamcommunity.com/openid/id/{STEAM}",
-                    "openid.identity": f"https://steamcommunity.com/openid/id/{STEAM}",
-                },
-            )
-    finally:
-        post_save.disconnect(record, sender=SocialAccount)
-    assert response.status_code == 302
-    assert saved and all(data == {"steamid": STEAM} for data in saved)
-    assert SocialAccount.objects.get(provider="steam", uid=STEAM).extra_data == {"steamid": STEAM}
-
-
-def test_rejected_steam_reconnect_does_not_save_profile_fields(api, user):
-    from allauth.socialaccount.providers.openid.views import OpenIDCallbackView
-    from allauth.socialaccount.providers.steam.provider import SteamOpenIDProvider
-
-    account = SocialAccount.objects.create(user=user, provider="steam", uid=STEAM)
-    other = get_user_model().objects.create_user("other", "other@example.test")
-    EmailAddress.objects.create(user=other, email=other.email, verified=True)
-    api.force_login(other)
-    session = api.session
-    session["socialaccount_states"] = {
-        "test-nonce": [{"process": "connect"}, time.time(), "steam"],
-    }
-    session.save()
-    response_login = SocialLogin(
-        account=SocialAccount(
-            provider="steam",
-            uid=STEAM,
-            extra_data={"steamid": STEAM, "personaname": "synthetic-private-field"},
-        )
-    )
-    with (
-        patch.object(
-            OpenIDCallbackView,
-            "get_openid_response",
-            return_value=SimpleNamespace(status="success"),
-        ),
-        patch.object(SteamOpenIDProvider, "sociallogin_from_response", return_value=response_login),
-    ):
-        response = api.get(
-            "/accounts/steam/login/callback/",
-            {
-                "openid.op_endpoint": "https://steamcommunity.com/openid/login",
-                "openid.claimed_id": f"https://steamcommunity.com/openid/id/{STEAM}",
-                "openid.identity": f"https://steamcommunity.com/openid/id/{STEAM}",
-            },
-        )
-    assert response.status_code == 409
-    account.refresh_from_db()
-    assert account.extra_data == {"steamid": STEAM}
-    assert account.user == user
 
 
 def test_profile_migration_removes_only_steam_extra_fields(user):

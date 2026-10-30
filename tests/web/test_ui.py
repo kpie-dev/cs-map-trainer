@@ -19,10 +19,12 @@ from django.utils import timezone
 from django.utils.formats import date_format
 from django.utils.translation import override
 
+from cs_map_trainer.analysis import BASE_LIMITATIONS
 from cs_map_trainer.exporting import export_scenario
 from cs_map_trainer.maps import map_label
 from cs_map_trainer.web import practice, services
-from cs_map_trainer.web.models import PracticeReview, SteamIdentity, Upload
+from cs_map_trainer.web.models import PracticeReview, Upload
+from cs_map_trainer.web.presentation import LIMITATIONS
 
 pytestmark = pytest.mark.django_db
 
@@ -190,11 +192,10 @@ def test_onboarding_does_not_expose_upload_before_verification(api, user):
     assert api.get("/practice/").url == "/accounts/email/"
     assert api.get("/account/").status_code == 200
     EmailAddress.objects.filter(user=user).update(verified=True)
-    SteamIdentity.objects.filter(owner=user).delete()
     response = api.get("/")
-    assert b'id="upload-form"' not in response.content
-    assert "Link your Steam profile" in response.content.decode()
-    assert b"process" in api.get("/account/").content
+    assert b'id="upload-form"' in response.content
+    assert "No Steam sign-in required" in response.content.decode()
+    assert b"OpenID" not in api.get("/account/").content
 
 
 def test_home_has_rights_csrf_and_actual_quota(api, upload):
@@ -206,11 +207,15 @@ def test_home_has_rights_csrf_and_actual_quota(api, upload):
     assert b"CS2 ONLY / MIRAGE OR DUST2" in response.content
     assert b"DE_MIRAGE OR DE_DUST2 / UP TO 1 GiB" in response.content
     assert "no-store" in response["Cache-Control"]
+    response = api.get(f"/uploads/{upload.pk}/")
+    assert (
+        f"Analyzed SteamID: <strong>{upload.player_steam_id}</strong>" in response.content.decode()
+    )
 
 
 def test_account_and_login_redirect(api, user, client):
     response = api.get("/account/")
-    assert str(user.steamidentity.pk).encode() in response.content
+    assert b"No Steam sign-in or account linking required." in response.content
     assert b"player@example.test" in response.content
     client.logout()
     result = client.post("/accounts/login/", {"login": user.email, "password": "some-password"})
@@ -267,6 +272,132 @@ def test_report_and_training_use_real_data_and_exporter(api, completed_upload):
     assert f"{map_name.upper()} / ROUND" in response.content.decode()
 
 
+def test_report_shows_both_native_locations_for_saved_scenarios(api, completed_upload):
+    upload = completed_upload
+    report = deepcopy(upload.report)
+    first, second = report["scenario_document"]["scenarios"]
+    report["scenario_locations"] = {
+        first["scenario_id"]: {
+            "snapshot_tick": first["source"]["snapshot_tick"],
+            "source": "m_szLastPlaceName",
+            "player": "TSpawn",
+            "opponent": "CTSpawn",
+        },
+        second["scenario_id"]: {
+            "snapshot_tick": second["source"]["snapshot_tick"],
+            "source": "m_szLastPlaceName",
+            "player": "CTSpawn",
+            "opponent": "TSpawn",
+        },
+    }
+    Upload.objects.filter(pk=upload.pk).update(report=report)
+    services.save_training_selection(
+        upload.owner, upload.pk, {"include": [first["scenario_id"]], "reject": []}
+    )
+    with patch("cs_map_trainer.parsing.DemoReader", side_effect=AssertionError("No reparse")):
+        response = api.get(reverse("report", args=[upload.pk]))
+    assert response.status_code == 200
+    text = response.content.decode()
+    cards = text.split('<article class="situation">')[1:]
+    first_visible = cards[0].split("<details>", 1)[0]
+    second_visible = cards[1].split("<details>", 1)[0]
+    assert "Victim: T Spawn" in first_visible
+    assert "Killer: CT Spawn" in first_visible
+    assert "Victim: CT Spawn" in second_visible
+    assert "Killer: T Spawn" in second_visible
+    assert "Locations at scenario snapshot" in first_visible
+    assert "last named areas reported by the game" in text
+    assert "not guessed from coordinates" in text
+    assert "before the first damage, not the moment of death" in text
+    assert "LOCATION SOURCE m_szLastPlaceName / TICK 100" in text
+    assert "VICTIM TSpawn / KILLER CTSpawn" in text
+    assert "Location data was not recorded" not in text
+    assert "Unknown location" not in text
+    assert response.context["selected_count"] == 1
+    assert [item["choice"] for item in response.context["situations"]] == ["include", "omit"]
+    upload.refresh_from_db()
+    assert upload.report == report
+
+
+@pytest.mark.parametrize("missing", ["victim", "killer", "both"])
+def test_report_handles_missing_callouts_per_participant(api, completed_upload, missing):
+    report = deepcopy(completed_upload.report)
+    report["scenario_locations"] = {
+        item["scenario_id"]: {
+            "snapshot_tick": item["source"]["snapshot_tick"],
+            "player": None if missing in {"victim", "both"} else "TSpawn",
+            "opponent": None if missing in {"killer", "both"} else "TSpawn",
+        }
+        for item in report["scenario_document"]["scenarios"]
+    }
+    Upload.objects.filter(pk=completed_upload.pk).update(report=report)
+    response = api.get(reverse("report", args=[completed_upload.pk]))
+    assert response.status_code == 200
+    card = response.content.decode().split('<article class="situation">', 1)[1]
+    visible, details = card.split("<details>", 1)
+    victim_name = "Location unavailable in demo" if missing in {"victim", "both"} else "T Spawn"
+    killer_name = "Location unavailable in demo" if missing in {"killer", "both"} else "T Spawn"
+    assert f"Victim: {victim_name}" in visible
+    assert f"Killer: {killer_name}" in visible
+    assert "XYZ " in details
+    assert 'name="choice_' in visible
+    assert "Location data was not recorded" not in response.content.decode()
+
+
+def test_legacy_report_does_not_guess_locations_from_coordinates(api, completed_upload):
+    report = deepcopy(completed_upload.report)
+    report["analysis_version"] = 2
+    report.pop("scenario_locations", None)
+    for scenario in report["scenario_document"]["scenarios"]:
+        # These coordinates were previously labelled T Spawn by the heuristic.
+        scenario["player"]["position"] = {"x": 1296.0, "y": -352.0, "z": -144.0}
+    Upload.objects.filter(pk=completed_upload.pk).update(report=report)
+    response = api.get(reverse("report", args=[completed_upload.pk]))
+    assert response.status_code == 200
+    text = response.content.decode()
+    assert "Victim: Not recorded in this report" in text
+    assert "Killer: Not recorded in this report" in text
+    assert "Upload the demo again to include it" in text
+    assert "Victim: T Spawn" not in text
+    assert "Location unavailable in demo" not in text
+    assert 'name="choice_' in text
+
+
+def test_native_location_values_are_escaped_in_labels_and_details(api, completed_upload):
+    report = deepcopy(completed_upload.report)
+    scenario = report["scenario_document"]["scenarios"][0]
+    report["scenario_locations"] = {
+        scenario["scenario_id"]: {
+            "snapshot_tick": scenario["source"]["snapshot_tick"],
+            "player": "<script>alert(1)</script>",
+            "opponent": "FuturePlace",
+        }
+    }
+    Upload.objects.filter(pk=completed_upload.pk).update(report=report)
+    response = api.get(reverse("report", args=[completed_upload.pk]))
+    assert response.status_code == 200
+    text = response.content.decode()
+    assert "<script>alert(1)</script>" not in text
+    assert "&lt;script&gt;alert(1)&lt;/script&gt;" in text
+    assert "Killer: Future Place" in text
+
+
+def test_invalid_saved_location_tick_fails_explicitly(api, completed_upload):
+    report = deepcopy(completed_upload.report)
+    scenario = report["scenario_document"]["scenarios"][0]
+    report["scenario_locations"] = {
+        scenario["scenario_id"]: {
+            "snapshot_tick": scenario["source"]["death_tick"],
+            "player": "TSpawn",
+            "opponent": "CTSpawn",
+        }
+    }
+    Upload.objects.filter(pk=completed_upload.pk).update(report=report)
+    response = api.get(reverse("report", args=[completed_upload.pk]))
+    assert response.status_code == 500
+    assert "The saved report is invalid" in response.content.decode()
+
+
 def test_history_reads_map_without_loading_deferred_reports(api, completed_upload):
     with CaptureQueriesContext(connection) as queries:
         response = api.get(reverse("history"))
@@ -293,16 +424,22 @@ def test_unfinished_upload_does_not_claim_a_map(api, upload):
         assert ">Mirage /" not in text
 
 
-def test_group_counts_and_denominator_are_not_skill_score(api, completed_upload):
+@pytest.mark.parametrize(
+    "wins, losses, expected_rate",
+    [(1, 7, "12.5%"), (0, 1, "0%"), (1, 0, "100%")],
+)
+def test_group_counts_and_denominator_are_not_skill_score(
+    api, completed_upload, wins, losses, expected_rate
+):
     upload = completed_upload
     report = upload.report
     report["groups"] = [
         {
             "group_id": "group-a",
-            "observations": 8,
-            "wins": 1,
-            "losses": 7,
-            "win_rate": 0.125,
+            "observations": wins + losses,
+            "wins": wins,
+            "losses": losses,
+            "win_rate": wins / (wins + losses),
             "player_side": "T",
             "player_weapon": "ak47",
             "opponent_weapon": "awp",
@@ -315,9 +452,132 @@ def test_group_counts_and_denominator_are_not_skill_score(api, completed_upload)
     Upload.objects.filter(pk=upload.pk).update(report=report)
     response = api.get(reverse("report", args=[upload.pk]))
     assert response.status_code == 200
-    assert b"group-a" in response.content
-    assert b"0.125" in response.content
-    assert "fraction from 0 to 1" in response.content.decode()
+    text = response.content.decode()
+    assert text.index("Choose your duels") < text.index("Duel statistics")
+    statistics = text.split('<details id="duel-statistics">', 1)[1]
+    assert "<summary>Duel statistics</summary>" in statistics
+    assert "ranked by number of losses" in statistics
+    assert "not just your practice selection" in statistics
+    assert "not every encounter or your overall performance" in statistics
+    assert "Small samples do not support strong conclusions" in statistics
+    assert f"<td>{wins + losses}</td>" in statistics
+    assert f'<td class="green">{wins}</td><td>{losses}</td>' in statistics
+    assert f"<td>{expected_rate}</td>" in statistics
+    assert "fraction from 0 to 1" not in text
+    summary, technical = statistics.split("<details>", 1)
+    assert "T / ak47 vs awp" in summary
+    assert "group-a" not in summary
+    assert "Player grid cell" not in summary
+    assert "<summary>Technical details</summary>" in technical
+    assert "group-a" in technical
+    assert "Player grid cell" in technical
+    assert "opponent_aim_inferred_toward_player" in technical
+    upload.refresh_from_db()
+    assert upload.report == report
+
+
+def test_report_prioritizes_selection_and_keeps_raw_data_in_closed_details(api, completed_upload):
+    response = api.get(reverse("report", args=[completed_upload.pk]))
+    text = response.content.decode()
+    assert "Recurring duel setups" not in text
+    assert "No comparable groups found." in text
+    cards = text.split('<article class="situation">')[1:]
+    assert len(cards) == 2
+    for card in cards:
+        visible, details = card.split("<details>", 1)
+        details = details.split("</details>", 1)[0]
+        assert "<h3>Round " in visible
+        assert 'name="choice_' in visible
+        assert "SCENARIO " not in visible
+        assert "SNAPSHOT " not in visible
+        assert "XYZ " not in visible
+        assert "SCENARIO " in details
+        assert "SNAPSHOT " in details
+        assert " / DAMAGE " in details
+        assert " / DEATH " in details
+        assert "XYZ " in details
+        assert "PITCH " in details
+        assert " / YAW " in details
+        assert " / ROLL " in details
+    assert "<details><summary>All reconstruction limits</summary>" in text
+    assert "<details><summary>Excluded events</summary>" in text
+    assert "Location unavailable" not in text
+
+
+def test_report_lists_shared_limits_once_and_keeps_scenario_warnings_visible(api, completed_upload):
+    report = completed_upload.report
+    report["limitations"] = list(BASE_LIMITATIONS)
+    first, second = report["scenario_document"]["scenarios"]
+    first["limitations"] = [
+        *BASE_LIMITATIONS,
+        "opponent_aim_inferred_toward_player",
+        "player_blinded",
+    ]
+    second["limitations"] = list(BASE_LIMITATIONS)
+    Upload.objects.filter(pk=completed_upload.pk).update(report=report)
+    response = api.get(reverse("report", args=[completed_upload.pk]))
+    text = unescape(response.content.decode())
+    cards = text.split('<article class="situation">')[1:]
+    for card in cards:
+        card = card.split("</article>", 1)[0]
+        for code in BASE_LIMITATIONS:
+            assert code not in card
+            assert LIMITATIONS[code] not in card
+            assert text.count(LIMITATIONS[code]) == 1
+    first_visible, first_details = cards[0].split("<details>", 1)
+    for code in ("opponent_aim_inferred_toward_player", "player_blinded"):
+        assert LIMITATIONS[code] in first_visible
+        assert code not in first_visible
+        assert code in first_details
+        assert LIMITATIONS[code] not in cards[1]
+    assert 'class="warning"' not in cards[1].split("</article>", 1)[0]
+
+
+def test_report_preserves_shared_limits_missing_from_report_metadata(api, completed_upload):
+    response = api.get(reverse("report", args=[completed_upload.pk]))
+    text = response.content.decode()
+    shared = text.split("<summary>All reconstruction limits</summary>", 1)[1]
+    shared = shared.split("</details>", 1)[0]
+    assert "map_geometry_unverified" in shared
+    assert LIMITATIONS["map_geometry_unverified"] in shared
+
+
+def test_wins_only_report_keeps_statistics_without_training_controls(api, completed_upload):
+    report = completed_upload.report
+    report.update(
+        status="no_eligible_duels",
+        scenario_document=None,
+        eligible_candidates=0,
+        kills_considered=1,
+        eligible_wins=1,
+    )
+    report["groups"] = [
+        {
+            "group_id": "win-only",
+            "observations": 1,
+            "wins": 1,
+            "losses": 0,
+            "win_rate": 1.0,
+            "player_side": "T",
+            "player_weapon": "ak47",
+            "opponent_weapon": "awp",
+            "player_cell": [0, 0, 0],
+            "opponent_cell": [1, 1, 0],
+            "context_limitations": [],
+            "selected_scenario_ids": [],
+        }
+    ]
+    Upload.objects.filter(pk=completed_upload.pk).update(report=report)
+    response = api.get(reverse("report", args=[completed_upload.pk]))
+    assert response.status_code == 200
+    text = response.content.decode()
+    assert "No practice candidates found" in text
+    assert '<details id="duel-statistics">' in text
+    assert "win-only" in text
+    assert "<td>100%</td>" in text
+    assert "Choose your duels" not in text
+    assert "Save selection" not in text
+    assert "Open practice" not in text
 
 
 def test_empty_report_has_no_export_or_selection(api, completed_upload):
@@ -594,20 +854,27 @@ def test_account_deletion_cannot_leave_concurrently_created_review(completed_upl
 
 
 def test_browser_navigation_errors_are_html_but_fetch_errors_stay_json(api, settings):
-    settings.SOCIALACCOUNT_PROVIDERS = deepcopy(settings.SOCIALACCOUNT_PROVIDERS)
-    settings.SOCIALACCOUNT_PROVIDERS["steam"]["APP"]["secret"] = ""
-    response = api.post("/accounts/steam/login/", {"process": "connect"}, HTTP_ACCEPT="text/html")
-    assert response.status_code == 503
-    assert b"trainer/app.css" in response.content
-    assert b"steam_not_configured" in response.content
+    data = {
+        "request_id": str(uuid.uuid4()),
+        "size_bytes": 32,
+        "has_upload_rights": True,
+        "player_steam_id": "76561198000000001",
+    }
     settings.R2_BUCKET = ""
     response = api.post(
+        "/backend/uploads/", data, content_type="application/json", HTTP_ACCEPT="text/html"
+    )
+    assert response.status_code == 503
+    assert b"trainer/app.css" in response.content
+    assert b"storage_not_configured" in response.content
+    response = api.post(
         "/backend/uploads/",
-        {"request_id": str(uuid.uuid4()), "size_bytes": 32, "has_upload_rights": True},
+        data,
         content_type="application/json",
     )
     assert response.status_code == 503
     assert response.json() == {"error": "storage_not_configured"}
+    assert not Upload.objects.exists()
 
 
 def test_active_upload_cannot_be_deleted(api, upload):
@@ -623,7 +890,7 @@ def test_history_and_queue_include_older_than_100_reports(api, completed_upload)
     for _index in range(102):
         Upload.objects.create(
             owner=upload.owner,
-            identity=upload.identity,
+            player_steam_id=upload.player_steam_id,
             request_id=uuid.uuid4(),
             size_bytes=32,
             key=f"inputs/{uuid.uuid4()}.dem",

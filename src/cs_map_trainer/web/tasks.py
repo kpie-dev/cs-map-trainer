@@ -17,7 +17,7 @@ from django.utils import timezone
 from cs_map_trainer.analysis import AnalysisReport
 from cs_map_trainer.exporting import ExportError, export_scenario
 
-from .models import SteamIdentity, Upload
+from .models import Upload
 from .processes import parser_slot
 from .services import STORAGE_ERRORS, TERMINAL, dispatch, month_start
 from .storage import R2, InvalidUpload
@@ -48,7 +48,7 @@ def run_parser(upload, directory, *, lock_fd=None):
             "-m",
             "cs_map_trainer.web.processor",
             str(directory / "input.dem"),
-            upload.identity_id,
+            upload.player_steam_id,
             str(output),
         ],
         env,
@@ -64,7 +64,7 @@ def run_parser(upload, directory, *, lock_fd=None):
             raise ValueError("Invalid parser error")
         return None, None
     report = AnalysisReport.model_validate_json(json.dumps(result["report"]))
-    if report.player_steam_id != upload.identity_id:
+    if report.player_steam_id != upload.player_steam_id:
         raise ValueError("Parser returned a different player")
     # Derive commands from the validated report, never trust commands from a child payload.
     scripts = []
@@ -177,7 +177,7 @@ def _process_upload(upload_id, lock_fd):
                 state, error, charged = Upload.State.READY, "", True
         except DemoRejected as rejection:
             state, error, charged = Upload.State.UNSUPPORTED, str(rejection), True
-            logger.warning("Linked player absent from upload %s", upload.pk)
+            logger.warning("Selected player absent from upload %s", upload.pk)
         except InvalidUpload:
             state, error, charged = Upload.State.UNSUPPORTED, "invalid_demo_object", True
             logger.warning("Invalid stored demo for upload %s", upload.pk)
@@ -250,7 +250,6 @@ def maintain():
     ).filter(quota_at__lt=month_start(now)).filter(
         Q(owner__isnull=True) | Q(state=Upload.State.DELETED)
     ).delete()
-    SteamIdentity.objects.filter(owner__isnull=True, upload__isnull=True).delete()
     clean_orphans(now)
 
 

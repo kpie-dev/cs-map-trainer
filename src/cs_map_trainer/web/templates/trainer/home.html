@@ -1,4 +1,5 @@
 {% extends "trainer/base.html" %}
+{% load static %}
 {% block content %}
 <section class="hero">
   <div class="telemetry cyan">DE_MIRAGE / DE_DUST2 / DEMO → REPORT → PRACTICE</div>
@@ -8,14 +9,16 @@
 <section class="panel uploader">
   <div class="section-top"><span class="badge warning">PROTOTYPE · NOT VERIFIED IN GAME</span><span class="telemetry">CS2 ONLY / MIRAGE OR DUST2</span></div>
   {% if not user.is_authenticated %}
-    <div class="dropzone"><h2>Create your account first</h2><p>Verify your email and link Steam before uploading a demo.</p><a class="button primary" href="{% url 'account_signup' %}">Create account</a> <a class="button" href="{% url 'account_login' %}">Sign in</a></div>
+    <div class="dropzone"><h2>Create your account first</h2><p>Verify your email to upload a demo. No Steam sign-in required.</p><a class="button primary" href="{% url 'account_signup' %}">Create account</a> <a class="button" href="{% url 'account_login' %}">Sign in</a></div>
   {% elif not email_verified %}
-    <div class="dropzone"><h2>Verify your email address</h2><p>Confirm your address to continue to Steam linking and demo uploads.</p><a class="button primary" href="{% url 'account_email' %}">Verify email</a></div>
-  {% elif not steam_identity %}
-    <div class="dropzone"><h2>Link your Steam profile</h2><p>Only your linked player is analyzed. Each SteamID can be linked to one account.</p><a class="button primary" href="{% url 'account' %}">Link Steam</a></div>
+    <div class="dropzone"><h2>Verify your email address</h2><p>Confirm your address to upload and analyze demos.</p><a class="button primary" href="{% url 'account_email' %}">Verify email</a></div>
   {% else %}
-    <form id="upload-form" method="post" data-steam-id="{{ steam_identity.pk }}">
+    <form id="upload-form" method="post" data-account-id="{{ user.pk }}">
       {% csrf_token %}
+      <label for="player-steam-id">Player SteamID64</label>
+      <input id="player-steam-id" name="player_steam_id" type="text" inputmode="numeric" pattern="[0-9]{17}" required value="{{ last_player_steam_id }}" aria-describedby="steam-id-help" autocomplete="off">
+      <p id="steam-id-help" class="muted">Enter the 17-digit SteamID of the player to analyze. We remember your last used ID as an editable suggestion, not a verified profile. No Steam sign-in required.</p>
+      <button id="steam-id-guide-open" type="button" commandfor="steam-id-guide" command="show-modal" aria-haspopup="dialog" aria-controls="steam-id-guide">Where can I find my SteamID?</button>
       <div class="dropzone" id="drop-zone">
         <span class="upload-mark" aria-hidden="true">↑</span><h2>Drop your demo here</h2><p>or choose a file from your device</p>
         <label class="file-label" for="demo-file">Choose .dem file</label>
@@ -31,11 +34,12 @@
       <noscript><p class="notice">JavaScript is required to upload a demo. You can still view your history and reports without it.</p></noscript>
     </form>
   {% endif %}
-  <div class="quota-strip"><span>Free: <strong>3 analyses per UTC calendar month</strong><br>Pro: <strong>$7.99/month / unlimited analyses for your linked SteamID</strong></span><span class="cyan">{% if paid_plan %}Pro active / unlimited{% elif steam_identity %}{{ quota_used }}/{{ quota_limit }} used{% else %}Account and Steam required{% endif %}</span></div>
-  <p class="muted">Both plans: up to 1 GiB per file and one active upload or analysis per SteamID. <a href="{% url 'account' %}#billing">Plans and billing</a></p>
+  <div class="quota-strip"><span>Free: <strong>3 analyses per account per UTC calendar month</strong><br>Pro: <strong>$7.99/month / unlimited analyses on your account</strong></span><span class="cyan">{% if paid_plan %}Pro active / unlimited{% elif user.is_authenticated %}{{ quota_used }}/{{ quota_limit }} used{% else %}Verified email required{% endif %}</span></div>
+  <p class="muted">Both plans: up to 1 GiB per file and one active upload or analysis per account. Changing SteamID does not reset your limit. <a href="{% url 'account' %}#billing">Plans and billing</a></p>
 </section>
+{% include "trainer/steam_id_guide.html" %}
 <section class="steps">
-  <article class="panel"><span class="step-number">01</span><h2>Upload your demo</h2><p>Analyze your linked player from a demo you provide. We do not fetch demos from other accounts.</p></article>
+  <article class="panel"><span class="step-number">01</span><h2>Upload your demo</h2><p>Paste a player's SteamID64 and provide a demo you have permission to analyze. Your results stay private to your account.</p></article>
   <article class="panel"><span class="step-number cyan">02</span><h2>Choose your duels</h2><p>Check the sample size and limitations. Keep the scenarios you want to practice.</p></article>
   <article class="panel"><span class="step-number green">03</span><h2>Practice and revisit</h2><p>Copy one complete duel setup. After practice, rate it to schedule your next review.</p></article>
 </section>

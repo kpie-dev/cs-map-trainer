@@ -6,12 +6,11 @@ from django.db import models
 from django.db.models import Q
 
 
-class SteamIdentity(models.Model):
-    steam_id = models.CharField(
-        primary_key=True, max_length=17, validators=[RegexValidator(r"^[0-9]{17}$")]
+class AccountPreferences(models.Model):
+    owner = models.OneToOneField(settings.AUTH_USER_MODEL, on_delete=models.CASCADE)
+    last_player_steam_id = models.CharField(
+        max_length=17, blank=True, validators=[RegexValidator(r"^[0-9]{17}$")]
     )
-    owner = models.OneToOneField(settings.AUTH_USER_MODEL, null=True, on_delete=models.SET_NULL)
-    created_at = models.DateTimeField(auto_now_add=True)
 
 
 class Upload(models.Model):
@@ -27,7 +26,7 @@ class Upload(models.Model):
 
     id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
     owner = models.ForeignKey(settings.AUTH_USER_MODEL, null=True, on_delete=models.SET_NULL)
-    identity = models.ForeignKey(SteamIdentity, on_delete=models.PROTECT)
+    player_steam_id = models.CharField(max_length=17, validators=[RegexValidator(r"^[0-9]{17}$")])
     request_id = models.UUIDField()
     size_bytes = models.PositiveBigIntegerField()
     key = models.CharField(max_length=100, unique=True)
@@ -50,20 +49,20 @@ class Upload(models.Model):
 
     class Meta:
         constraints = [
+            models.UniqueConstraint(fields=["owner", "request_id"], name="unique_upload_request"),
             models.UniqueConstraint(
-                fields=["identity", "request_id"], name="unique_upload_request"
-            ),
-            models.UniqueConstraint(
-                fields=["identity"],
+                fields=["owner"],
                 condition=Q(state__in=["uploading", "queued", "running"]),
-                name="one_active_upload_per_steam",
+                name="one_active_upload_per_account",
             ),
             models.CheckConstraint(
                 condition=Q(size_bytes__gte=8, size_bytes__lte=1024**3),
                 name="technical_demo_size",
             ),
         ]
-        indexes = [models.Index(fields=["identity", "created_at"])]
+        indexes = [
+            models.Index(fields=["owner", "created_at"], name="trainer_upl_owner_i_50063e_idx")
+        ]
 
 
 class PracticeReview(models.Model):

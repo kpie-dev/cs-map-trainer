@@ -6,7 +6,6 @@ from allauth.account.models import EmailAddress
 from django.contrib.auth import get_user_model
 
 from cs_map_trainer.web import services
-from cs_map_trainer.web.models import SteamIdentity
 from cs_map_trainer.web.storage import R2
 
 
@@ -14,7 +13,6 @@ from cs_map_trainer.web.storage import R2
 def user():
     user = get_user_model().objects.create_user("player", "player@example.test", "some-password")
     EmailAddress.objects.create(user=user, email=user.email, verified=True, primary=True)
-    SteamIdentity.objects.create(steam_id="76561198000000001", owner=user)
     return user
 
 
@@ -29,7 +27,7 @@ def storage():
 
 @pytest.fixture
 def upload(user, storage):
-    return services.initiate(user, uuid.uuid4(), 32, storage)
+    return services.initiate(user, uuid.uuid4(), 32, "76561198000000001", storage)
 
 
 @pytest.fixture

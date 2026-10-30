@@ -16,7 +16,7 @@
   <a class="brand" href="{% url 'home' %}"><span class="reticle" aria-hidden="true">+</span><span>CS2 DEMO REWIND<small>YOUR DUELS / YOUR PRACTICE</small></span></a>
   <span class="badge">BETA / PROTOTYPE</span>
   <div class="identity">
-    {% if steam_identity %}<span class="telemetry cyan">STEAM: {{ steam_identity.pk }}</span><span class="badge">{% if paid_plan %}PRO / UNLIMITED{% else %}{{ quota_used }}/{{ quota_limit }} / UTC MONTH{% endif %}</span>{% endif %}
+    {% if user.is_authenticated %}<span class="badge">{% if paid_plan %}PRO / UNLIMITED{% else %}{{ quota_used }}/{{ quota_limit }} / UTC MONTH{% endif %}</span>{% endif %}
     {% if user.is_authenticated %}<a class="button small" href="{% url 'account' %}">Account</a>{% else %}<a class="button small" href="{% url 'account_login' %}">Sign in</a>{% endif %}
   </div>
 </header>

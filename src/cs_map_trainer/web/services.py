@@ -1,5 +1,6 @@
 import json
 import logging
+import re
 import uuid
 from datetime import UTC, timedelta
 
@@ -16,7 +17,8 @@ from cs_map_trainer.exporting import ExportError, export_scenario
 from cs_map_trainer.packs import build_pack, load_scenarios, select_scenarios
 from cs_map_trainer.scenarios import ContractModel, Identifier
 
-from .models import SteamIdentity, Upload
+from .identity import lock_account
+from .models import AccountPreferences, Upload
 from .storage import R2, InvalidUpload
 
 logger = logging.getLogger(__name__)
@@ -51,44 +53,48 @@ def month_start(now=None):
     )
 
 
-def quota_used(identity):
+def quota_used(user):
     return (
-        Upload.objects.filter(identity=identity, quota_charged=True)
+        Upload.objects.filter(owner=user, quota_charged=True)
         .annotate(quota_at=Coalesce("accepted_at", "created_at"))
         .filter(quota_at__gte=month_start())
         .count()
     )
 
 
-def initiate(user, request_id, size, storage=None):
+def validate_player_steam_id(player_steam_id):
+    if not isinstance(player_steam_id, str) or not re.fullmatch(
+        r"[0-9]{17}", player_steam_id.strip()
+    ):
+        raise IntakeError("invalid_player_steam_id", 400)
+    return player_steam_id.strip()
+
+
+def initiate(user, request_id, size, player_steam_id, storage=None):
     from .billing import paid_access
 
     if type(size) is not int or not 8 <= size <= 1024**3:
         raise IntakeError("invalid_demo_size", 400)
+    player_steam_id = validate_player_steam_id(player_steam_id)
     storage = storage or R2()
     now = timezone.now()
     with transaction.atomic():
-        try:
-            identity = SteamIdentity.objects.select_for_update().get(owner=user)
-        except SteamIdentity.DoesNotExist as error:
-            raise IntakeError("verified_steam_required", 403) from error
-        existing = Upload.objects.filter(identity=identity, request_id=request_id).first()
+        lock_account(user)
+        existing = Upload.objects.filter(owner=user, request_id=request_id).first()
         if existing:
-            if existing.size_bytes != size:
+            if existing.size_bytes != size or existing.player_steam_id != player_steam_id:
                 raise IntakeError("idempotency_conflict")
             return existing
-        if Upload.objects.filter(identity=identity, state__in=ACTIVE).exists():
+        if Upload.objects.filter(owner=user, state__in=ACTIVE).exists():
             raise IntakeError("active_upload_exists")
-        if Upload.objects.filter(
-            identity=identity, state__in=TERMINAL, cleanup_pending=True
-        ).exists():
+        if Upload.objects.filter(owner=user, state__in=TERMINAL, cleanup_pending=True).exists():
             raise IntakeError("input_cleanup_pending", 503)
-        used = quota_used(identity)
-        if used >= settings.DEMO_MONTHLY_LIMIT and not paid_access(identity):
+        used = quota_used(user)
+        if used >= settings.DEMO_MONTHLY_LIMIT and not paid_access(user):
             raise IntakeError("monthly_demo_limit", 429)
         upload = Upload(
             owner=user,
-            identity=identity,
+            player_steam_id=player_steam_id,
             request_id=request_id,
             size_bytes=size,
             key=f"inputs/{uuid.uuid4()}.dem",
@@ -97,6 +103,9 @@ def initiate(user, request_id, size, storage=None):
         upload.save()
         upload.multipart_id = storage.begin(upload)
         upload.save(update_fields=["multipart_id"])
+        AccountPreferences.objects.update_or_create(
+            owner=user, defaults={"last_player_steam_id": player_steam_id}
+        )
     return upload
 
 
@@ -154,8 +163,8 @@ def delete_account(user):
     from .billing import close_account
 
     with transaction.atomic():
-        identity = SteamIdentity.objects.select_for_update().filter(owner=user).first()
-        if identity and Upload.objects.filter(identity=identity, state__in=ACTIVE).exists():
+        lock_account(user)
+        if Upload.objects.filter(owner=user, state__in=ACTIVE).exists():
             raise IntakeError("processing_in_progress")
         close_account(user)
         user.delete()
@@ -175,7 +184,7 @@ def validated_report(upload):
     except (ValueError, TypeError) as error:
         logger.error("Invalid saved training report for upload %s", upload.pk)
         raise IntakeError("invalid_saved_report", 500) from error
-    if report.player_steam_id != upload.identity_id:
+    if report.player_steam_id != upload.player_steam_id:
         logger.error("Saved report player mismatch for upload %s", upload.pk)
         raise IntakeError("invalid_saved_report", 500)
     if (report.status == "candidates_ready") != (report.scenario_document is not None):

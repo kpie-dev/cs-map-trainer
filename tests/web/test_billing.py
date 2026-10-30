@@ -20,7 +20,7 @@ from django.test import Client
 from django.utils import timezone
 
 from cs_map_trainer.web import billing, services, tasks
-from cs_map_trainer.web.models import BillingAccount, BillingEvent, SteamIdentity, Upload
+from cs_map_trainer.web.models import BillingAccount, BillingEvent, Upload
 
 pytestmark = pytest.mark.django_db
 
@@ -160,7 +160,7 @@ def test_checkout_uses_fixed_price_and_reuses_open_session(api, stripe, user):
     account = BillingAccount.objects.get(owner=user)
     assert account.checkout_id == "cs_fixture"
     assert account.paid_until is None
-    assert not billing.paid_access(user.steamidentity)
+    assert not billing.paid_access(user)
     posts = [
         item
         for item in stripe.request.call_args_list
@@ -172,7 +172,7 @@ def test_checkout_uses_fixed_price_and_reuses_open_session(api, stripe, user):
     assert posts[0].kwargs["data"]["mode"] == "subscription"
     assert "Idempotency-Key" in posts[0].kwargs["headers"]
     assert all(
-        str(user.steamidentity.pk) not in call.kwargs["headers"].get("Idempotency-Key", "")
+        "76561198000000001" not in call.kwargs["headers"].get("Idempotency-Key", "")
         for call in stripe.request.call_args_list
     )
     assert api.post(url).url == response.url
@@ -190,7 +190,7 @@ def test_return_does_not_grant_paid_access(api, account):
     assert response.status_code == 302
     account.refresh_from_db()
     assert account.paid_until is None
-    assert not billing.paid_access(account.owner.steamidentity)
+    assert not billing.paid_access(account.owner)
 
 
 @pytest.mark.parametrize(
@@ -249,7 +249,7 @@ def test_verified_webhook_grants_only_invoice_proven_period(client, account, str
     account.refresh_from_db()
     expected = datetime.fromtimestamp(stripe.lines[0]["period"]["end"], UTC)
     assert account.paid_until == expected
-    assert billing.paid_access(account.owner.steamidentity)
+    assert billing.paid_access(account.owner)
     assert BillingEvent.objects.count() == 1
     stripe.request.reset_mock()
     assert deliver(client, settings, event()).status_code == 200
@@ -287,11 +287,11 @@ def test_unpaid_or_wrong_price_never_grants_access(
 def test_failed_renewal_keeps_only_already_paid_time(client, account, stripe, settings):
     stripe.subscriptions = [subscription("past_due")]
     deliver(client, settings, event(kind="invoice.payment_failed"))
-    assert billing.paid_access(account.owner.steamidentity)
+    assert billing.paid_access(account.owner)
     stripe.lines[0]["period"]["end"] = int(time.time()) - 1
     stripe.lines[0]["period"]["start"] = int(time.time()) - 3600
     deliver(client, settings, event("evt_later", "invoice.payment_failed"))
-    assert not billing.paid_access(account.owner.steamidentity)
+    assert not billing.paid_access(account.owner)
 
 
 def test_cancel_at_period_end_keeps_access_until_paid_end(client, account, stripe, settings):
@@ -300,9 +300,9 @@ def test_cancel_at_period_end_keeps_access_until_paid_end(client, account, strip
     deliver(client, settings, event(kind="customer.subscription.updated"))
     account.refresh_from_db()
     assert account.cancel_at_period_end
-    assert billing.paid_access(account.owner.steamidentity)
+    assert billing.paid_access(account.owner)
     with patch("cs_map_trainer.web.billing.timezone.now", return_value=account.paid_until):
-        assert not billing.paid_access(account.owner.steamidentity)
+        assert not billing.paid_access(account.owner)
 
 
 def test_stale_paid_event_cannot_resurrect_canceled_subscription(
@@ -323,7 +323,7 @@ def test_stale_paid_event_cannot_resurrect_canceled_subscription(
 def test_nonpaid_statuses_do_not_grant_access(client, account, stripe, settings, kind):
     stripe.subscriptions = [subscription(kind)]
     deliver(client, settings, event())
-    assert not billing.paid_access(account.owner.steamidentity)
+    assert not billing.paid_access(account.owner)
 
 
 @pytest.mark.parametrize("offset,secret", [(-301, None), (301, None), (0, "wrong-secret")])
@@ -428,13 +428,12 @@ def test_missing_configuration_is_explicit(api, settings):
     assert b"billing_not_configured" in response.content
 
 
-def test_checkout_requires_verified_email_and_steam(api, user, stripe):
+def test_checkout_requires_verified_email_without_steam(api, user, stripe):
     EmailAddress.objects.filter(user=user).update(verified=False)
     assert api.post("/account/billing/checkout/").url == "/accounts/email/"
     EmailAddress.objects.filter(user=user).update(verified=True)
-    SteamIdentity.objects.filter(owner=user).delete()
-    assert api.post("/account/billing/checkout/").status_code == 403
     stripe.request.assert_not_called()
+    assert api.post("/account/billing/checkout/").status_code == 302
 
 
 def test_account_delete_cancels_remote_then_preserves_only_closed_billing_reference(
@@ -517,45 +516,45 @@ def test_late_events_after_deletion_cancel_instead_of_granting(
 def test_month_boundary_is_utc_and_inclusive(user, storage):
     now = datetime(2026, 11, 1, tzinfo=UTC)
     with patch("cs_map_trainer.web.services.timezone.now", return_value=now):
-        item = services.initiate(user, uuid.uuid4(), 32, storage)
-        assert services.quota_used(user.steamidentity) == 1
+        item = services.initiate(user, uuid.uuid4(), 32, "76561198000000001", storage)
+        assert services.quota_used(user) == 1
         Upload.objects.filter(pk=item.pk).update(
             state="ready",
             cleanup_pending=False,
             created_at=now - timedelta(microseconds=1),
         )
-        assert services.quota_used(user.steamidentity) == 0
+        assert services.quota_used(user) == 0
         Upload.objects.filter(pk=item.pk).update(created_at=now)
-        assert services.quota_used(user.steamidentity) == 1
+        assert services.quota_used(user) == 1
 
 
 def test_paid_plan_has_no_count_limit_but_keeps_size_and_active_limit(user, storage, account):
     account.paid_until = timezone.now() + timedelta(days=1)
     account.save()
     for _ in range(12):
-        upload = services.initiate(user, uuid.uuid4(), 32, storage)
+        upload = services.initiate(user, uuid.uuid4(), 32, "76561198000000001", storage)
         Upload.objects.filter(pk=upload.pk).update(state="ready", cleanup_pending=False)
-    active = services.initiate(user, uuid.uuid4(), 32, storage)
+    active = services.initiate(user, uuid.uuid4(), 32, "76561198000000001", storage)
     with pytest.raises(services.IntakeError, match="active_upload_exists"):
-        services.initiate(user, uuid.uuid4(), 32, storage)
+        services.initiate(user, uuid.uuid4(), 32, "76561198000000001", storage)
     with pytest.raises(services.IntakeError, match="invalid_demo_size"):
-        services.initiate(user, uuid.uuid4(), 1024**3 + 1, storage)
+        services.initiate(user, uuid.uuid4(), 1024**3 + 1, "76561198000000001", storage)
     account.paid_until = timezone.now()
     account.save()
     Upload.objects.filter(pk=active.pk).update(state="ready", cleanup_pending=False)
     with pytest.raises(services.IntakeError, match="monthly_demo_limit"):
-        services.initiate(user, uuid.uuid4(), 32, storage)
+        services.initiate(user, uuid.uuid4(), 32, "76561198000000001", storage)
 
 
 def test_closed_or_foreign_account_cannot_grant_entitlement(user, account):
     account.paid_until = timezone.now() + timedelta(days=1)
     account.closed = True
     account.save()
-    assert not billing.paid_access(user.steamidentity)
+    assert not billing.paid_access(user)
     account.closed = False
     account.owner = get_user_model().objects.create_user("other", "other@example.test")
     account.save()
-    assert not billing.paid_access(user.steamidentity)
+    assert not billing.paid_access(user)
 
 
 def test_account_ui_shows_paid_plan_without_network_on_get(api, account, stripe):
@@ -577,7 +576,7 @@ def test_monthly_tombstone_keeps_same_month_usage_after_eight_days(
 ):
     now = datetime(2026, 10, 29, tzinfo=UTC)
     with patch("cs_map_trainer.web.services.timezone.now", return_value=now):
-        upload = services.initiate(user, uuid.uuid4(), 32, storage)
+        upload = services.initiate(user, uuid.uuid4(), 32, "76561198000000001", storage)
     Upload.objects.filter(pk=upload.pk).update(
         created_at=now - timedelta(days=8),
         state="ready",
@@ -595,7 +594,7 @@ def test_monthly_tombstone_keeps_same_month_usage_after_eight_days(
     ):
         tasks.maintain()
     assert Upload.objects.filter(pk=upload.pk).exists()
-    assert SteamIdentity.objects.exists()
+    assert upload.player_steam_id == "76561198000000001"
 
 
 def test_reconciliation_command_recovers_delayed_webhook(account, stripe):
@@ -685,18 +684,14 @@ def test_concurrent_duplicate_webhooks_are_serialized(account, stripe):
     )
 
 
-def test_new_account_with_same_steam_does_not_reset_monthly_quota(user, storage):
-    identity = user.steamidentity
+def test_new_account_has_independent_quota_for_same_player(user, storage):
     for _ in range(3):
-        upload = services.initiate(user, uuid.uuid4(), 32, storage)
+        upload = services.initiate(user, uuid.uuid4(), 32, "76561198000000001", storage)
         Upload.objects.filter(pk=upload.pk).update(state="ready", cleanup_pending=False)
     services.delete_account(user)
-    Upload.objects.filter(identity=identity).update(cleanup_pending=False)
+    Upload.objects.filter(owner=None).update(cleanup_pending=False)
     other = get_user_model().objects.create_user("new-account", "new@example.test")
-    identity.owner = other
-    identity.save()
-    with pytest.raises(services.IntakeError, match="monthly_demo_limit"):
-        services.initiate(other, uuid.uuid4(), 32, storage)
+    assert services.initiate(other, uuid.uuid4(), 32, "76561198000000001", storage)
 
 
 def test_external_hosted_url_is_rejected(api, stripe):

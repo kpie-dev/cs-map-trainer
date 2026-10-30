@@ -16,14 +16,14 @@ potwierdzenia w grze. Wyniki mają status `unverified_in_game`.
 Nie planujemy własnego serwera/pluginu.
 
 Istnieje też **aplikacja Django/PostgreSQL/Django-Q2 z treningowym UI**:
-konta e-mail, powiązanie Steam, prywatny upload R2, jednorazowa analiza
+konta e-mail, SteamID64 podawane przy demie, prywatny upload R2, jednorazowa analiza
 i prywatna historia z zapamiętywaniem wyboru sytuacji, eksportem pojedynczej
 linii komend i opcjonalnymi paczkami ZIP. Responsywne szablony korzystają ze
 stylistyki Tactical HUD z `design/`, bez zewnętrznych skryptów i fikcyjnych statystyk.
 Są deklarowane oceny treningu i prosta kolejka powtórek, bez telemetrii z gry.
 Jest też moduł Stripe Billing: **Free — 3 analizy na miesiąc kalendarzowy UTC;
-Pro — 7,99 USD/mies. bez limitu liczby analiz własnego SteamID**.
-Integracje z rzeczywistym R2, Steam, SMTP i Stripe wymagają
+Pro — 7,99 USD/mies. bez limitu liczby analiz na koncie serwisu**.
+Integracje z rzeczywistym R2, SMTP i Stripe wymagają
 konfiguracji i osobnej próby przed wdrożeniem; testy z atrapami nie są jej dowodem.
 
 ## Uruchomienie
@@ -66,15 +66,19 @@ Boty bez SteamID nie są oferowane do wyboru.
 Bez `--output` JSON trafia na stdout, a diagnostyka na stderr. `--output` wymaga
 istniejącego katalogu i **nie nadpisuje istniejącego pliku**.
 
-Raport analizy ma teraz **`analysis_version: 2`**. Kontrakt dokumentu scenariuszy
-pozostaje w wersji `schema_version: 1`; to dwa różne formaty. Nowa wersja raportu
-rozszerza statystyki o wygrane i zmienia `groups[].observations` z liczby samych
-porażek na liczbę porównywalnych wygranych i porażek łącznie.
+Nowe raporty analizy mają **`analysis_version: 3`** i zapisane nazwy lokacji
+z demka. Raporty v2 pozostają obsługiwane, ale nie mają tych danych.
+Kontrakt dokumentu scenariuszy nadal ma `schema_version: 1`; to osobny format.
+Statystyki w obu obsługiwanych wersjach raportu uwzględniają wygrane i porażki;
+`groups[].observations` jest ich sumą.
 
 Raport zawiera:
 
 - `status`: `candidates_ready` albo `no_eligible_duels`;
 - `scenario_document`: dokument v1 ze scenariuszami lub `null`, gdy brak kandydatów;
+- `scenario_locations`: słownik po `scenario_id`, zawierający `snapshot_tick`,
+  `source: "m_szLastPlaceName"` oraz surowe nazwy `player` (ofiara) i `opponent`
+  (zabójca) dla wybranych przegranych pojedynków; brak nazwy jest jawnym `null`;
 - `excluded` i `excluded_wins`: ticki rozstrzygnięć oraz przyczyny odrzuceń
   odpowiednio przegranych i wygranych starć;
 - `deaths_considered`/`eligible_candidates` i `kills_considered`/`eligible_wins`:
@@ -85,6 +89,43 @@ Raport zawiera:
   oraz liczniki blokowych operacji I/O z `getrusage` dla całego procesu
   (na Windows RSS i te liczniki są jawnie niedostępne);
 - wersje parsera/reguł, hash dema, mapę/build i ograniczenia rekonstrukcji.
+
+W raporcie webowym główną sekcją jest **Choose your duels**, służąca do wyboru
+konkretnych przegranych pojedynków do treningu. Ostrzeżenia dotyczące danego
+scenariusza pozostają widoczne, a identyfikatory, ticki, pozycje i kąty są
+w rozwijanych szczegółach. Wspólne ograniczenia rekonstrukcji opisujemy raz,
+w sekcji **Limitations and exclusions**.
+
+Zwijana sekcja **Duel statistics** poniżej listy pokazuje statystyki grup:
+próby, wygrane, przegrane i win rate jako procent (np. 12.5%). Dotyczą one
+wszystkich zakwalifikowanych pojedynków, niezależnie od bieżącego wyboru do
+treningu; zapisany JSON nadal używa ułamka 0–1. Grupy są przybliżone, sortowane
+według liczby przegranych i nie stanowią oceny umiejętności. Komórki siatki
+w szczegółach technicznych nie są nazwami miejscówek.
+
+Karty pojedynków pokazują **nazwy lokacji ofiary i zabójcy odczytane z demka**
+na Mirage i Dust2. Awpy 3.1.1 nie zwraca ich w `snapshots()`, ale udostępnia
+surowe pole przez `Demo.ticks(props=["m_szLastPlaceName"], players_only=True)`.
+To dodatkowy przebieg po demie, wykonywany raz, tylko gdy wybrano scenariusze.
+Z wyniku zachowujemy wyłącznie nazwy potrzebnych graczy w dokładnych
+`snapshot_tick`, przed pierwszym obrażeniem, **nie w ticku śmierci**.
+Nie interpolujemy między tickami i nie zastępujemy nazw mapowaniem XYZ.
+Puste wartości pozostają `null`, mają ostrzeżenie w logu i widoczną etykietę
+`Location unavailable in demo`; nie wykluczają poprawnego pojedynku.
+Błędy struktury odczytu i duplikaty potrzebnej pary tick/gracz są jawne.
+
+`m_szLastPlaceName` to ostatni nazwany obszar raportowany przez grę.
+Może być szerszy niż społecznościowy callout i nie gwarantuje natychmiastowej
+zmiany nazwy na granicy obszarów. `callouts.py` jedynie formatuje zapisane nazwy,
+np. `BombsiteA → A Site`, a dla Mirage `SnipersNest → Window`, `Shop → Market`.
+Surowe nazwy, tick i źródło są dostępne w szczegółach karty. Nie pobieramy
+geometrii map, radarów ani innych assetów; usunięto ręczne prostopadłościany.
+
+Lokacje zapisują się w raporcie przed usunięciem wejściowego demka. Starsze
+raporty bez metadanych pokazują `Not recorded in this report` z informacją
+o konieczności ponownego przesłania demka. Nie można odzyskać tych danych
+z usuniętego wejścia. Kontrakt scenariuszy, grupowanie, wybory i eksport
+pozostają bez zmian; metadane lokacji nie trafiają do komend treningowych.
 
 Domyślnie wybieranych jest maksymalnie 10 scenariuszy, z pierwszymi obrażeniami
 między oboma graczami w końcowym oknie 128 ticków przed śmiercią.
@@ -107,7 +148,7 @@ w gracza przed kontaktem. Dostępne kąty pozostają zachowane; kąty gracza
 nie są zgadywane. Brak pozycji, nieprawidłowe kąty i nieokreślony kierunek
 nadal wykluczają sytuację. Ta sama reguła dotyczy porównywalnych wygranych;
 grupy z przybliżeniem są oddzielone od grup z kompletem kątów z dema.
-Wersja reguł tej analizy to `damage-window-v3`; format raportu pozostaje v2,
+Wersja reguł tej analizy to `damage-window-v3`; nowe raporty mają format v3,
 a kontrakt scenariuszy v1.
 
 Grupy są prostą heurystyką: komórki 256 jednostek na każdej osi dla obu pozycji,
@@ -298,7 +339,7 @@ Eksporter ma własne ograniczenia opisane powyżej; nie są dowodem zgodności g
 Testy backendu wymagają PostgreSQL 16 z użytkownikiem mającym prawo tworzenia
 bazy testowej; testy CLI/jednostkowe nie potrzebują działającej bazy.
 Ustaw `PGHOST`, `PGPORT`, `PGDATABASE`, `PGUSER`, `PGPASSWORD`.
-`pytest` używa osobnej konfiguracji `tests/web_settings.py`, atrap R2/Steam
+`pytest` używa osobnej konfiguracji `tests/web_settings.py`, atrap R2/Stripe
 i skrzynki e-mail w pamięci, bez sekretów wdrożeniowych.
 
 ```sh
@@ -331,7 +372,7 @@ ręczne oznaczenie każdego kontaktu ani ocena trenera.
 Na uprawnionym lokalnym demie Dust2 sprawdzono również analizę, zgodność XYZ
 i kątów z migawkami, eksport paczki oraz rzeczywisty proces potomny parsera
 używany przez worker. Nagłówek potwierdził `de_dust2`, build `10924`.
-Nie jest to odbiór rzeczywistych R2/Steam ani komend w CS2/Yprac.
+Nie jest to odbiór rzeczywistego R2 ani komend w CS2/Yprac.
 
 ## Aplikacja webowa i backend
 
@@ -345,7 +386,7 @@ prywatnymi operacjami monolitu z sesją Django i CSRF. Obraz CLI pozostaje osobn
 | Strona | Ścieżka |
 |---|---|
 | Strona główna i upload | `/` |
-| Konto, weryfikacja e-mail, Steam i usunięcie konta | `/account/` |
+| Konto, weryfikacja e-mail, podpowiedź SteamID i usunięcie konta | `/account/` |
 | Prywatna historia ze stronicowaniem | `/history/` |
 | Status zadania, raport i zapis wyboru/odrzuceń | `/uploads/<id>/` |
 | Jedna aktywna sytuacja, kopiowanie komend i ocena | `/uploads/<id>/training/` |
@@ -353,10 +394,10 @@ prywatnymi operacjami monolitu z sesją Django i CSRF. Obraz CLI pozostaje osobn
 
 Logowanie przekierowuje do historii. Formularze allauth (rejestracja,
 potwierdzenie adresu, reset hasła i wylogowanie) korzystają ze wspólnej powłoki.
-Przed weryfikacją e-mail i Steam nie wysyłamy dema. Upload wymaga potwierdzenia
+Przed weryfikacją e-mail nie wysyłamy dema. Upload wymaga SteamID64 i potwierdzenia
 uprawnień, pokazuje rzeczywisty postęp transferu i wysyła surowy plik prosto do R2.
 UUID rezerwacji i etap transferu pozostają w pamięci sesji przeglądarki,
-oddzielnie dla SteamID. Przy ponowieniu trzeba wybrać ten sam plik; po błędzie
+oddzielnie dla konta, razem z wybranym SteamID. Przy ponowieniu trzeba wybrać ten sam plik; po błędzie
 potwierdzenia udanego transferu nie wysyłamy pliku drugi raz. Nie jest to retry
 parsowania. Po wygaśnięciu rezerwacji wymagany jest nowy upload.
 
@@ -394,17 +435,26 @@ wykonania ćwiczenia. Nie ma automatycznego uruchamiania gry, powiadomień,
 pomiaru poprawy ani potwierdzonego importu Yprac.
 
 **Polityka:** publiczna rejestracja e-mail/hasło i potwierdzenie adresu;
-przed uploadem obowiązkowe Steam OpenID. Jeden SteamID64 jest przypisany do
-jednego konta aplikacji, bez samodzielnego odpinania. Analiza dotyczy tylko tego
-gracza; jego obecność w demie jest sprawdzana. Free obejmuje **3 przyjęte dema na
-SteamID w miesiącu kalendarzowym UTC**, z rezerwacją przy rozpoczęciu uploadu i jednym
+bez powiązywania ani logowania Steam. Przy każdym uploadzie wymagany jest
+`player_steam_id`: SteamID64 analizowanego gracza (tekst, 17 cyfr ASCII;
+białe znaki na brzegach są usuwane). Jego obecność w demie jest sprawdzana,
+ale własność profilu nie jest weryfikowana. Ostatnie SteamID przyjęte przy nowej
+rezerwacji zapisujemy na koncie jako edytowalną podpowiedź na kolejne uploady,
+także z innego urządzenia. Modal przy polu pokazuje instrukcję Steam → Account
+details → Steam ID z lokalnymi ilustracjami poglądowymi, nie screenshotami;
+instrukcja jest w domyślnie zamkniętym dialogu otwieranym przyciskiem, nie w sekcji
+na dole strony. W przeglądarkach obsługujących `commandfor` przycisk działa też
+bez JavaScript. Free obejmuje **3 przyjęte dema na
+konto w miesiącu kalendarzowym UTC**, z rezerwacją przy rozpoczęciu uploadu i jednym
 aktywnym zadaniem. 1 GiB jest wyłącznie technicznym limitem pojedynczego pliku.
-Pro kosztuje **7,99 USD miesięcznie** i usuwa limit liczby analiz tego SteamID,
+Pro kosztuje **7,99 USD miesięcznie** i usuwa limit liczby analiz na koncie,
 ale nie limit rozmiaru, jedno aktywne zadanie ani globalną wyłączność parsera.
 Miesiąc Free resetuje się pierwszego dnia o 00:00 UTC. Wszystkie naliczone
 analizy miesiąca, również z czasu Pro, są uwzględniane po powrocie do Free.
 Zły/nieobsługiwany plik zużywa przyjęcie, błąd infrastruktury zwalnia kwotę.
-Niedokończona rezerwacja wygasa bez naliczenia.
+Niedokończona rezerwacja wygasa bez naliczenia. Brak wskazanego gracza w demie
+zużywa przyjęcie. Zmiana SteamID nie resetuje limitu ani aktywnego zadania;
+różne konta mogą wskazać to samo SteamID bez współdzielenia raportów.
 
 Demo trafia z przeglądarki do prywatnego R2 Standard, nie przez web. Backend
 tworzy multipart upload z jedną częścią, podpisuje dokładny `Content-Length`,
@@ -426,21 +476,19 @@ Nowy upload jest blokowany do usunięcia poprzedniego wejścia, aby awaria
 sprzątania nie pozwalała gromadzić kolejnych dem mimo zwalniania kwoty.
 Lifecycle R2 stanowi dodatkowe zabezpieczenie; nie gwarantuje usunięcia w dokładnej
 sekundzie. Po usunięciu konta minimalna ewidencja SteamID i kwoty pozostaje do końca
-bieżącego miesiąca UTC, aby nowa rejestracja nie resetowała limitu. Odzyskanie powiązania
-przez administratora nie może kasować tej ewidencji. Operacje usunięcia konta
+bieżącego miesiąca UTC i do zakończenia cleanupu. Podpowiedź SteamID jest kasowana
+razem z kontem. Nie ma blokady SteamID ani kwoty między kontami; nowa rejestracja
+dostaje osobny limit Free. Operacje usunięcia konta
 wymagają hasła i zakończenia aktywnego zadania. Usunięcia należy uwzględnić
 także w przyszłej procedurze odtwarzania backupu.
 
 ### Konfiguracja i uruchomienie
 
 Skopiuj `.env.example` do `.env`, ustaw własne `DJANGO_SECRET_KEY` i `PGPASSWORD`
-oraz dane prywatnego R2, SMTP i Steam Web API. Klucz Steam jest potrzebny
-providerowi allauth do pobrania profilu po weryfikacji OpenID; w bazie z tego
-profilu zachowywany jest jedynie SteamID. Sekretów nie dodawaj do Git.
-Callback ogranicza dane przed lookup/zapisem allauth, również przy ponownym
-lub odrzuconym połączeniu Steam. Migracja `0002_minimize_steam_profiles`
-usuwa nadmiarowe pola ze starszych zapisanych profili; wdrożenie wymaga
-uruchomienia `cs-map-trainer-web migrate`. Migracja `0003_training_selection`
+oraz dane prywatnego R2 i SMTP. Klucz Steam Web API nie jest już potrzebny;
+trasy Steam login/callback i social connections są wyłączone. Sekretów nie
+dodawaj do Git. Historyczna migracja `0002_minimize_steam_profiles`
+usuwała nadmiarowe pola ze starszych profili. Migracja `0003_training_selection`
 dodaje zapis wyboru przy wyniku; istniejące raporty domyślnie obejmują wszystkie
 sytuacje i nie są przepisywane.
 Migracja `0004_practicereview` dodaje bieżące oceny i terminy powtórek.
@@ -448,6 +496,12 @@ Migracja `0005_billing_accounts` dodaje konta Stripe, stan dostępu i minimalne
 potwierdzenia obsłużonych webhooków. Zmiana kwoty Free na miesiąc UTC obejmuje
 istniejącą, zachowaną ewidencję uploadów; nie zeruje bieżącego zużycia.
 Przed uruchomieniem nowego UI zastosuj wszystkie migracje.
+Migracja `0007_account_upload_players` kopiuje SteamID do istniejących uploadów
+i podpowiedzi konta, usuwa `SteamIdentity` oraz przenosi limity i ograniczenia
+bazodanowe na właściciela. Raporty, oceny, bieżące zużycie konta i subskrypcje
+Stripe są zachowane. Jest **nieodwracalna**: wpisany identyfikator nie pozwala
+odtworzyć zweryfikowanej własności. Zastosuj ją przy zatrzymanym intake i workerach,
+z backupem bazy; nie cofaj samego obrazu na starszy kod po migracji.
 `DJANGO_DEBUG=1` jest wyłącznie do lokalnego HTTP; produkcja wymaga HTTPS,
 `DJANGO_DEBUG=0`, poprawnych hostów i originów.
 
@@ -520,10 +574,10 @@ kontener, nie hosta. Przy korzystaniu z linków w wiadomościach używaj tego
 samego hosta co podczas rejestracji/logowania.
 
 Wariant wymusza debug i lokalny serwer Django ze statykami, zeruje konfigurację
-R2/Steam/Stripe i nie wymaga Node.js na hoście. Uruchamiaj tylko wskazane usługi
+R2/Stripe i nie wymaga Node.js na hoście. Uruchamiaj tylko wskazane usługi
 `db mail web`: worker i reaper z bazowego Compose nie są częścią tej próby.
 Można sprawdzić rejestrację, potwierdzanie adresu, reset hasła i nawigację.
-Nie jest to pełne E2E: bez Steam/R2 nie ma rzeczywistego uploadu i analizy,
+Nie jest to pełne E2E: bez R2 nie ma rzeczywistego uploadu i analizy,
 a raporty, trening i abonament wymagają osobnych danych/usług testowych.
 Nie używaj prawdziwych danych ani haseł produkcyjnych.
 
@@ -538,11 +592,16 @@ backendu z emulatorem S3 Moto zamiast R2. Używa projektu
 `cs-map-trainer-ui` i obrazu weba zbudowanego powyżej także dla workera/reapera.
 Dodaj je jako trzeci plik `-f` i uruchom `storage`, `web`, `worker`,
 `maintenance`. Przed pierwszym uploadem utwórz testowy bucket
-`local-demo-inputs` przez API S3 emulatora i przygotuj testowe konto/tożsamość.
-Endpoint `http://storage:5000` jest dostępny wyłącznie w sieci Compose;
-klient wykonujący podpisany PUT musi działać w tej samej sieci. Nie jest to
-wariant do uploadu z przeglądarki hosta. Storage jest nietrwały i nie publikuje
-portów. Moto nie potwierdza zabezpieczeń podpisów/CORS ani kontraktu prawdziwego R2.
+`local-demo-inputs` przez API S3 emulatora i przygotuj konto z potwierdzonym e-mailem.
+Backend używa `http://storage:5000` w sieci Compose, a podpisane adresy do uploadu
+z przeglądarki używają `http://localhost:5001`. Port emulatora jest publikowany
+wyłącznie na interfejsie loopback. Opcjonalne `R2_PUBLIC_ENDPOINT` zmienia adres
+używany do podpisywania, bez zmiany endpointu backendu; adres musi być osiągalny
+z przeglądarki i nie wolno podmieniać hosta w już podpisanym URL.
+Przed uploadem skonfiguruj CORS dla adresu strony, np. poleceniem
+`cs-map-trainer-web configure_r2 --origin http://localhost:8000` w kontenerze web.
+Storage jest nietrwały: po odtworzeniu kontenera ponownie utwórz bucket i skonfiguruj CORS.
+Moto nie potwierdza zabezpieczeń podpisów/CORS ani kontraktu prawdziwego R2.
 
 ### Wdrożenie z Caddy (Linux/VPS)
 
@@ -555,7 +614,7 @@ Nie stawiaj dodatkowego proxy/CDN przed Caddy bez osobnego odbioru zaufania
 do nagłówków i wydawania certyfikatów.
 
 Przygotuj `.env` poza Git (uprawnienia `0600`, dostęp tylko administratora).
-Oprócz danych bazy/R2/Steam/SMTP i **testowych** danych Stripe ustaw:
+Oprócz danych bazy/R2/SMTP i **testowych** danych Stripe ustaw:
 
 ```dotenv
 DJANGO_DEBUG=0
@@ -671,7 +730,7 @@ Przed planowaną aktualizacją zatrzymaj timer i poczekaj na zakończenie
 aktywnej usługi; po odbiorze ponownie włącz timer.
 
 Ten wariant wymaga jeszcze odbioru na docelowym VPS: prawdziwego certyfikatu
-ACME, usług R2/Steam/SMTP/Stripe, awarii workera, backupu i monitoringu.
+ACME, usług R2/SMTP/Stripe, awarii workera, backupu i monitoringu.
 Lokalny certyfikat testowy nie potwierdza publicznego wdrożenia.
 
 Bez Dockera: wyeksportuj zmienne środowiska (Django nie wczytuje automatycznie
@@ -685,9 +744,8 @@ produkcyjna izolacja i twardy limit kontenera dotyczą wariantu Linux/Docker.
 | Operacja | Ścieżka / dane |
 |---|---|
 | Rejestracja/logowanie/weryfikacja | `/accounts/signup/`, `/accounts/login/`, odnośnik z e-maila |
-| Powiązanie Steam | `POST /accounts/steam/login/`, formularz `process=connect`, CSRF |
-| Historia i cookie CSRF | `GET /backend/history/` |
-| Rezerwacja/upload | `POST /backend/uploads/`, JSON: UUID `request_id`, `size_bytes`, `has_upload_rights: true`; odpowiedź zawiera podpisany URL `PUT` |
+| Historia i cookie CSRF | `GET /backend/history/`; `last_player_steam_id` (tekst lub pusty tekst) i prywatne `uploads` |
+| Rezerwacja/upload | `POST /backend/uploads/`, JSON: UUID `request_id`, `size_bytes`, tekst `player_steam_id`, `has_upload_rights: true`; odpowiedź zawiera podpisany URL `PUT` |
 | Ukończenie i kolejka | `POST /backend/uploads/<id>/complete/` |
 | Status/wynik/komendy | `GET /backend/uploads/<id>/` |
 | Odczyt wyboru | `GET /backend/uploads/<id>/selection/` |
@@ -698,8 +756,19 @@ produkcyjna izolacja i twardy limit kontenera dotyczą wariantu Linux/Docker.
 | Usunięcie konta | `POST /backend/account/delete/`, JSON `password` |
 
 W żądaniach modyfikujących dane wysyłaj cookie sesji i `X-CSRFToken`.
-`request_id` jest kluczem idempotencji dla jednego SteamID; ponowienie z innym
-rozmiarem jest błędem. SteamID przesłany przez klienta nie wybiera gracza.
+`request_id` jest kluczem idempotencji dla konta; ponowienie z innym
+rozmiarem lub SteamID jest błędem. SteamID przesłany przez klienta wybiera gracza,
+nie właściciela raportu. Brak/błędny identyfikator daje 400
+`invalid_player_steam_id`, bez rezerwacji i naliczenia limitu. Każdy upload
+w odpowiedzi zawiera `player_steam_id` i `expires_at`; pole `steam_linked` usunięto.
+Przeglądarka zachowuje rezerwację w sessionStorage osobno dla konta, razem z
+identyfikatorem i sygnaturą pliku. Retry wymaga oryginalnego SteamID i pliku;
+zmiana podpowiedzi konta nie zmienia trwającej ani zapisanej analizy.
+Po wygaśnięciu zapamiętanej rezerwacji odświeżenie formularza zwalnia lokalną
+blokadę pliku i SteamID; serwer nadal egzekwuje stan zadania i cleanup.
+Jednoznaczny brak konfiguracji storage przy pierwszej próbie utworzenia rezerwacji
+zwalnia lokalną blokadę. Timeout lub błąd po przyjęciu rezerwacji zachowuje jej
+dane do bezpiecznego ponowienia.
 Upload do R2 nie wymaga cookie sesji, tylko podpisanego URL. Błędy mają jawne
 kody, m.in. `monthly_demo_limit`, `unsupported_or_invalid_demo`, `worker_lost`,
 `linked_player_not_in_demo`, `processing_failed`; stan sprzątania jest
@@ -773,7 +842,7 @@ Odpowiedzi są prywatne i mają `Cache-Control` zabraniający przechowywania.
 Każdy eksport nadal ma `unverified_in_game`; wygenerowanie go nie potwierdza
 działania w CS2/Yprac.
 
-Przed wdrożeniem wykonaj próbę rzeczywistej rejestracji, SMTP i Steam oraz
+Przed wdrożeniem wykonaj próbę rzeczywistej rejestracji i SMTP oraz
 opty-in test kontraktu R2 na prywatnym buckecie. Test tworzy wyłącznie własny
 syntetyczny payload i usuwa jego obiekt; nie wysyła dem z repozytorium:
 
@@ -785,19 +854,20 @@ Próba sprawdza odrzucenie innego rozmiaru, poprawny upload, zakończenie, odczy
 unieważnienie URL i usunięcie. Bez tych prób nie oznaczamy integracji jako
 potwierdzonej. Selekcja i autoryzowane eksporty backendu są zaimplementowane,
 tak samo jak treningowe UI, deklarowane oceny użytkownika i powtórki.
-Pakiet trenera/akademii i analiza innych zawodników są poza zakresem.
+Pakiet trenera/akademii jest poza zakresem; wskazanie gracza nie zwalnia
+z obowiązku posiadania praw do przesłania i analizy dema.
 
 ### Stripe Billing — abonament za serwis
 
-Zaimplementowano **7,99 USD/miesiąc, bez limitu liczby analiz własnego,
-powiązanego SteamID**. Free obejmuje 3 analizy na miesiąc kalendarzowy UTC.
+Zaimplementowano **7,99 USD/miesiąc, bez limitu liczby analiz na koncie
+serwisu**. Free obejmuje 3 analizy na konto na miesiąc kalendarzowy UTC.
 Nie ma opłat za pojedyncze demo, okresu próbnego ani automatycznego zwrotu.
 Portal i checkout są hostowane przez Stripe; aplikacja nie przechowuje kart.
 
 Zakup, portal zarządzania i odświeżenie stanu są na `/account/`.
-Wymagają zweryfikowanego e-maila, powiązanego Steam, sesji oraz POST z CSRF.
+Wymagają zweryfikowanego e-maila, sesji oraz POST z CSRF, bez Steam.
 Cena i identyfikator klienta wynikają z konfiguracji serwera, nie z formularza.
-Otwarty checkout jest ponownie używany; klucze idempotencji i blokada SteamID
+Otwarty checkout jest ponownie używany; klucze idempotencji i blokada konta
 chronią przed podwójnym utworzeniem sesji przy ponowieniu lub współbieżności.
 Powrót `/account/billing/return/` **nie nadaje Pro**.
 

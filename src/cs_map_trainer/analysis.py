@@ -1,18 +1,20 @@
 """Conservative, damage-based duel candidates; not a tactical error detector."""
 
+import logging
 import math
 import sys
 import time
 from collections import Counter, defaultdict
 from collections.abc import Callable
-from typing import Annotated, Literal, Protocol
+from typing import Annotated, Literal, Protocol, Self
 
 import polars as pl
-from pydantic import BaseModel, ConfigDict, Field, ValidationError
+from pydantic import BaseModel, ConfigDict, Field, ValidationError, model_validator
 
 from cs_map_trainer.parsing import PARSER_VERSION, DemoError
 from cs_map_trainer.scenarios import (
     ContractModel,
+    Identifier,
     MapIdentity,
     Participant,
     Position,
@@ -20,11 +22,13 @@ from cs_map_trainer.scenarios import (
     ScenarioDocument,
     Source,
     SteamID,
+    Tick,
     ViewAngles,
 )
 from cs_map_trainer.weapons import GUNS
 
 RULES_VERSION = "damage-window-v3"
+logger = logging.getLogger(__name__)
 SIDES = {"terrorist": "T", "counter-terrorist": "CT"}
 BASE_LIMITATIONS = [
     "map_geometry_unverified",
@@ -46,6 +50,7 @@ class Reader(Protocol):
     def players(self) -> pl.DataFrame: ...
     def combat(self) -> tuple[pl.DataFrame, pl.DataFrame, pl.DataFrame]: ...
     def snapshots(self, ticks: list[int]) -> pl.DataFrame: ...
+    def locations(self, ticks: list[int]) -> pl.DataFrame: ...
 
 
 class ParserRow(BaseModel):
@@ -78,6 +83,22 @@ class KillRow(DamageRow):
     victim_side: str | None
     penetrated: int | None = None
     thrusmoke: bool | None = None
+
+
+PlaceName = Annotated[str, Field(min_length=1, max_length=128, pattern=r"^\S(?:.*\S)?$")]
+
+
+class LocationRow(ParserRow):
+    tick: Tick
+    steamid: int
+    last_place_name: str | None
+
+
+class ScenarioLocations(ContractModel):
+    snapshot_tick: Tick
+    source: Literal["m_szLastPlaceName"] = "m_szLastPlaceName"
+    player: PlaceName | None
+    opponent: PlaceName | None
 
 
 class SnapshotRow(ParserRow):
@@ -179,7 +200,7 @@ class Metrics(ContractModel):
 
 
 class AnalysisReport(ContractModel):
-    analysis_version: Annotated[int, Field(ge=2, le=2)] = 2
+    analysis_version: Literal[2, 3] = 3
     status: Literal["candidates_ready", "no_eligible_duels"]
     parser_version: str
     rules_version: str
@@ -197,8 +218,61 @@ class AnalysisReport(ContractModel):
     excluded_wins: list[ExcludedDuel]
     groups: list[DuelGroup]
     scenario_document: ScenarioDocument | None
+    scenario_locations: dict[Identifier, ScenarioLocations] = Field(default_factory=dict)
     limitations: list[str]
     metrics: Metrics
+
+    @model_validator(mode="after")
+    def validate_locations(self) -> Self:
+        if self.analysis_version == 2 and self.scenario_locations:
+            raise ValueError("Scenario locations require analysis version 3")
+        scenarios = (
+            {scenario.scenario_id: scenario for scenario in self.scenario_document.scenarios}
+            if self.scenario_document
+            else {}
+        )
+        for scenario_id, locations in self.scenario_locations.items():
+            scenario = scenarios.get(scenario_id)
+            if scenario is None or locations.snapshot_tick != scenario.source.snapshot_tick:
+                raise ValueError("Location metadata must match a saved scenario and snapshot tick")
+        return self
+
+
+def _scenario_locations(reader: Reader, scenarios: list[Scenario]) -> dict[str, ScenarioLocations]:
+    if not scenarios:
+        return {}
+    needed = {
+        (scenario.source.snapshot_tick, int(participant.steam_id))
+        for scenario in scenarios
+        for participant in (scenario.player, scenario.opponent)
+    }
+    ticks = sorted({tick for tick, _ in needed})
+    locations: dict[tuple[int, int], str | None] = {}
+    for row in reader.locations(ticks).to_dicts():
+        if (row.get("tick"), row.get("steamid")) not in needed:
+            continue
+        location = LocationRow.model_validate(row)
+        key = (location.tick, location.steamid)
+        if key in locations:
+            raise DemoError("Ambiguous duplicate player location at the same tick")
+        locations[key] = (location.last_place_name or "").strip() or None
+    missing = sum(locations.get(key) is None for key in needed)
+    if missing:
+        logger.warning(
+            "Native demo location unavailable for %s of %s selected player snapshots",
+            missing,
+            len(needed),
+        )
+    return {
+        scenario.scenario_id: ScenarioLocations(
+            snapshot_tick=scenario.source.snapshot_tick,
+            player=locations.get((scenario.source.snapshot_tick, int(scenario.player.steam_id))),
+            opponent=locations.get(
+                (scenario.source.snapshot_tick, int(scenario.opponent.steam_id))
+            ),
+        )
+        for scenario in scenarios
+    }
 
 
 def roster(reader: Reader) -> Roster:
@@ -423,6 +497,7 @@ def analyze(
     )
     selected = [scenario for key in ordered for scenario in grouped.get(key, [])][:max_scenarios]
     selected_ids = {scenario.scenario_id for scenario in selected}
+    scenario_locations = _scenario_locations(reader, selected)
     groups: list[DuelGroup] = []
     for index, key in enumerate(ordered, start=1):
         losses, victories = grouped.get(key, []), grouped_wins.get(key, [])
@@ -478,6 +553,7 @@ def analyze(
         scenario_document=ScenarioDocument(schema_version=1, scenarios=selected)
         if selected
         else None,
+        scenario_locations=scenario_locations,
         limitations=[
             *BASE_LIMITATIONS,
             "ranking_is_loss_frequency_not_win_rate",

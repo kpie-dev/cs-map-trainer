@@ -1,10 +1,12 @@
+import json
 from copy import deepcopy
 from dataclasses import dataclass, field
 
 import polars as pl
 import pytest
+from pydantic import ValidationError
 
-from cs_map_trainer.analysis import analyze, roster
+from cs_map_trainer.analysis import AnalysisReport, analyze, roster
 from cs_map_trainer.parsing import DemoError
 from cs_map_trainer.scenarios import MapIdentity, ScenarioDocument
 
@@ -36,7 +38,9 @@ class FakeReader:
     kill_rows: list = field(default_factory=list)
     damage_rows: list = field(default_factory=list)
     snapshot_rows: list = field(default_factory=list)
+    location_rows: list = field(default_factory=list)
     requested_ticks: list = field(default_factory=list)
+    requested_location_ticks: list = field(default_factory=list)
 
     def players(self):
         return pl.DataFrame(
@@ -55,6 +59,10 @@ class FakeReader:
     def snapshots(self, ticks):
         self.requested_ticks.append(ticks)
         return pl.DataFrame(self.snapshot_rows)
+
+    def locations(self, ticks):
+        self.requested_location_ticks.append(ticks)
+        return pl.DataFrame(self.location_rows)
 
 
 @pytest.fixture(params=["de_mirage", "de_dust2"])
@@ -103,6 +111,10 @@ def reader(request):
             (OPPONENT, "counter-terrorist", "m4a1", 100.0),
         )
     ]
+    reader.location_rows = [
+        {"tick": 99, "steamid": PLAYER, "last_place_name": "BombsiteA"},
+        {"tick": 99, "steamid": OPPONENT, "last_place_name": "CTSpawn"},
+    ]
     return reader
 
 
@@ -126,6 +138,90 @@ def test_analysis_report_can_be_exported_without_reparsing(reader):
     assert report.map == reader.map
     assert all(entry.map == reader.map for entry in pack.manifest.entries)
     assert reader.requested_ticks == requested_ticks
+
+
+def test_native_locations_are_saved_for_the_exact_scenario_snapshot(reader):
+    reader.location_rows.extend(
+        [
+            {"tick": 98, "steamid": PLAYER, "last_place_name": "WrongPreviousTick"},
+            {"tick": 120, "steamid": PLAYER, "last_place_name": "WrongDeathTick"},
+            {"tick": 99, "steamid": THIRD, "last_place_name": "WrongPlayer"},
+        ]
+    )
+    report = run(reader)
+    scenario = report.scenario_document.scenarios[0]
+    assert report.analysis_version == 3
+    assert reader.requested_location_ticks == [[99]]
+    assert report.scenario_locations[scenario.scenario_id].model_dump() == {
+        "snapshot_tick": 99,
+        "source": "m_szLastPlaceName",
+        "player": "BombsiteA",
+        "opponent": "CTSpawn",
+    }
+    restored = AnalysisReport.model_validate_json(report.model_dump_json())
+    assert restored.scenario_locations == report.scenario_locations
+    assert restored.scenario_document == report.scenario_document
+
+
+@pytest.mark.parametrize("value", [None, "", "   "])
+def test_missing_native_name_is_explicit_and_does_not_exclude_a_duel(reader, value, caplog):
+    reader.location_rows[0]["last_place_name"] = value
+    report = run(reader)
+    scenario = report.scenario_document.scenarios[0]
+    locations = report.scenario_locations[scenario.scenario_id]
+    assert locations.player is None
+    assert locations.opponent == "CTSpawn"
+    assert report.eligible_candidates == 1
+    assert not report.excluded
+    assert "Native demo location unavailable for 1 of 2" in caplog.text
+
+
+def test_location_rows_are_not_carried_forward_from_other_ticks(reader, caplog):
+    for row in reader.location_rows:
+        row["tick"] = 98
+    report = run(reader)
+    locations = next(iter(report.scenario_locations.values()))
+    assert locations.player is locations.opponent is None
+    assert "Native demo location unavailable for 2 of 2" in caplog.text
+
+
+def test_native_names_are_trimmed_but_not_replaced_in_the_report(reader):
+    reader.location_rows[0]["last_place_name"] = "  BombsiteA  "
+    assert next(iter(run(reader).scenario_locations.values())).player == "BombsiteA"
+
+
+def test_duplicate_native_location_identity_fails_explicitly(reader):
+    reader.location_rows.append(deepcopy(reader.location_rows[0]))
+    with pytest.raises(DemoError, match="Ambiguous duplicate player location"):
+        run(reader)
+
+
+def test_legacy_v2_report_remains_readable_without_location_metadata(reader):
+    payload = json.loads(run(reader).model_dump_json())
+    payload["analysis_version"] = 2
+    payload.pop("scenario_locations")
+    report = AnalysisReport.model_validate_json(json.dumps(payload))
+    assert report.analysis_version == 2
+    assert report.scenario_locations == {}
+    from cs_map_trainer.packs import load_scenarios
+
+    assert load_scenarios(json.dumps(payload).encode()) == report.scenario_document
+
+
+@pytest.mark.parametrize("corruption", ["tick", "scenario", "version", "source"])
+def test_location_metadata_cannot_claim_a_different_tick_scenario_or_source(reader, corruption):
+    payload = json.loads(run(reader).model_dump_json())
+    scenario_id = next(iter(payload["scenario_locations"]))
+    if corruption == "tick":
+        payload["scenario_locations"][scenario_id]["snapshot_tick"] = 120
+    elif corruption == "scenario":
+        payload["scenario_locations"]["other"] = payload["scenario_locations"].pop(scenario_id)
+    elif corruption == "source":
+        payload["scenario_locations"][scenario_id]["source"] = "guessed_xyz"
+    else:
+        payload["analysis_version"] = 2
+    with pytest.raises(ValidationError):
+        AnalysisReport.model_validate_json(json.dumps(payload))
 
 
 def test_negative_coordinates_and_height_cells_preserve_map(reader):
@@ -383,6 +479,10 @@ def test_group_counts_precede_selection_and_decode_ticks_once(reader):
     reader.snapshot_rows.extend([{**row, "tick": 199} for row in deepcopy(reader.snapshot_rows)])
     result = run(reader, max_scenarios=1, contact_window_ticks=64)
     assert reader.requested_ticks == [[99, 199]]
+    assert reader.requested_location_ticks == [[99]]
+    assert set(result.scenario_locations) == {
+        item.scenario_id for item in result.scenario_document.scenarios
+    }
     assert result.eligible_candidates == 2
     assert result.omitted_by_limit == 1
     assert result.groups[0].observations == 2
@@ -412,6 +512,8 @@ def test_no_eligible_deaths_returns_explicit_empty_analysis(reader):
     assert result.status == "no_eligible_duels"
     assert result.groups == []
     assert reader.requested_ticks == []
+    assert reader.requested_location_ticks == []
+    assert result.scenario_locations == {}
 
 
 def test_roster_excludes_bots_and_preserves_unicode_names(reader):
@@ -479,7 +581,7 @@ def add_comparable_win(reader):
 def test_comparable_wins_use_selected_players_perspective_in_grouping(reader):
     add_comparable_win(reader)
     result = run(reader)
-    assert result.analysis_version == 2
+    assert result.analysis_version == 3
     assert result.deaths_considered == result.eligible_candidates == 1
     assert result.kills_considered == result.eligible_wins == 1
     assert result.excluded_wins == []
@@ -489,6 +591,7 @@ def test_comparable_wins_use_selected_players_perspective_in_grouping(reader):
     assert len(result.scenario_document.scenarios) == 1
     assert result.scenario_document.scenarios[0].source.death_tick == 120
     assert reader.requested_ticks == [[99, 699]]
+    assert reader.requested_location_ticks == [[99]]
 
 
 def test_angle_fallback_is_consistent_for_comparable_wins_and_losses(reader):

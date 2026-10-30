@@ -16,8 +16,6 @@ INSTALLED_APPS = [
     "allauth",
     "allauth.account",
     "allauth.socialaccount",
-    "allauth.socialaccount.providers.openid",
-    "allauth.socialaccount.providers.steam",
     "django_q",
     "cs_map_trainer.web.apps.TrainerConfig",
 ]
@@ -74,20 +72,9 @@ ACCOUNT_LOGIN_METHODS = {"email"}
 ACCOUNT_SIGNUP_FIELDS = ["email*", "password1*", "password2*"]
 ACCOUNT_EMAIL_VERIFICATION = "mandatory"
 ACCOUNT_UNIQUE_EMAIL = True
-SOCIALACCOUNT_ADAPTER = "cs_map_trainer.web.identity.SteamAdapter"
 SOCIALACCOUNT_AUTO_SIGNUP = False
 SOCIALACCOUNT_LOGIN_ON_GET = False
 SOCIALACCOUNT_EMAIL_AUTHENTICATION = False
-SOCIALACCOUNT_PROVIDERS = {
-    "steam": {
-        "APP": {
-            "client_id": "trainer",
-            "secret": os.environ.get("STEAM_API_KEY", ""),
-            "key": "",
-            "settings": {"hidden": True},
-        }
-    }
-}
 LOGIN_URL = "/accounts/login/"
 LOGIN_REDIRECT_URL = "/history/"
 ACCOUNT_LOGOUT_REDIRECT_URL = "/accounts/login/"
@@ -122,6 +109,7 @@ DATA_UPLOAD_MAX_MEMORY_SIZE = 16384
 FILE_UPLOAD_MAX_MEMORY_SIZE = 0
 
 R2_ENDPOINT = os.environ.get("R2_ENDPOINT", "")
+R2_PUBLIC_ENDPOINT = os.environ.get("R2_PUBLIC_ENDPOINT", "")
 R2_BUCKET = os.environ.get("R2_BUCKET", "")
 R2_ACCESS_KEY_ID = os.environ.get("R2_ACCESS_KEY_ID", "")
 R2_SECRET_ACCESS_KEY = os.environ.get("R2_SECRET_ACCESS_KEY", "")

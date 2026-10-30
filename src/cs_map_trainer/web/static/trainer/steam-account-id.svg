@@ -1,0 +1,11 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="800" height="270" viewBox="0 0 800 270" role="img" aria-labelledby="title description">
+  <title id="title">Finding Steam ID on Account details</title>
+  <desc id="description">Simplified illustration, not a screenshot. Below the account heading, copy the 17 digits labelled Steam ID. The number shown is fictional.</desc>
+  <rect width="800" height="270" rx="8" fill="#171b27"/>
+  <text x="24" y="35" fill="#a4adbf" font-family="sans-serif" font-size="16">ILLUSTRATION / FICTIONAL ACCOUNT AND ID</text>
+  <rect x="20" y="54" width="760" height="194" rx="4" fill="#0a0e19"/>
+  <text x="40" y="96" fill="#dfe2f3" font-family="sans-serif" font-size="27">Example account's Account</text>
+  <rect x="32" y="114" width="550" height="58" rx="4" fill="#262a36" stroke="#ffc174" stroke-width="3"/>
+  <text x="48" y="153" fill="#ffc174" font-family="monospace" font-size="32">Steam ID: 76561198000000001</text>
+  <text x="40" y="212" fill="#dfe2f3" font-family="sans-serif" font-size="21">2. Copy your own 17-digit number, not this example.</text>
+</svg>

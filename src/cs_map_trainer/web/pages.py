@@ -9,6 +9,8 @@ from django.shortcuts import redirect, render
 from django.views.decorators.cache import never_cache
 from django.views.decorators.http import require_GET, require_POST
 
+from cs_map_trainer.analysis import BASE_LIMITATIONS
+from cs_map_trainer.callouts import format_place_name
 from cs_map_trainer.exporting import ASSUMPTIONS, SESSION_CHANGES, ExportError, export_scenario
 from cs_map_trainer.maps import map_label
 
@@ -140,22 +142,41 @@ def report(request, upload_id):
         analysis = validated_report(upload)
         context["analysis"] = analysis
         context["map_label"] = map_label(analysis.map.name)
-        context["limitations"] = [LIMITATIONS.get(code, code) for code in analysis.limitations]
+        context["limitations"] = list(analysis.limitations)
         if analysis.scenario_document is not None:
             selection = get_training_selection(request.user, upload.pk)
-            context["situations"] = [
-                {
-                    "scenario": item,
-                    "choice": (
-                        "include"
-                        if item.scenario_id in selection["selected_scenario_ids"]
-                        else "reject"
-                        if item.scenario_id in selection["reject"]
-                        else "omit"
-                    ),
-                }
-                for item in analysis.scenario_document.scenarios
-            ]
+            context["situations"] = []
+            for item in analysis.scenario_document.scenarios:
+                locations = analysis.scenario_locations.get(item.scenario_id)
+                context["situations"].append(
+                    {
+                        "scenario": item,
+                        "locations": locations,
+                        "victim_location": format_place_name(item.map.name, locations.player)
+                        if locations
+                        else None,
+                        "killer_location": format_place_name(item.map.name, locations.opponent)
+                        if locations
+                        else None,
+                        "warnings": [
+                            code for code in item.limitations if code not in BASE_LIMITATIONS
+                        ],
+                        "choice": (
+                            "include"
+                            if item.scenario_id in selection["selected_scenario_ids"]
+                            else "reject"
+                            if item.scenario_id in selection["reject"]
+                            else "omit"
+                        ),
+                    }
+                )
+            context["locations_not_recorded"] = any(
+                item["locations"] is None for item in context["situations"]
+            )
+            for item in analysis.scenario_document.scenarios:
+                for code in item.limitations:
+                    if code in BASE_LIMITATIONS and code not in context["limitations"]:
+                        context["limitations"].append(code)
             context["selected_count"] = len(selection["selected_scenario_ids"])
     return render(request, "trainer/report.html", context)
 

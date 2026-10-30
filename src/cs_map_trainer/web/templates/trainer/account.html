@@ -3,18 +3,18 @@
 <div class="page-heading"><span class="eyebrow">PROFILE / ACCESS</span><h1>Your account</h1><p>{{ user.email }}</p></div>
 <div class="columns">
 <section class="panel"><h2>01 / Email and password</h2><p>{% if email_verified %}<span class="green">Email verified</span>{% else %}<span class="warning">Email verification required</span>{% endif %}</p><div class="actions"><a class="button" href="{% url 'account_email' %}">Manage email</a><a href="{% url 'account_change_password' %}">Change password</a><a href="{% url 'account_logout' %}">Sign out</a></div></section>
-<section class="panel"><h2>02 / Steam profile</h2>
-{% if steam_identity %}<p class="telemetry cyan">{{ steam_identity.pk }}</p><p>Linked. We do not store your Steam display name or avatar. You cannot unlink this profile yourself.</p><p>{% if paid_plan %}<strong class="green">Pro: unlimited analyses for your linked SteamID.</strong>{% else %}Free analyses used this UTC calendar month: <strong>{{ quota_used }}/{{ quota_limit }}</strong>. Resets on the first day of each month at 00:00 UTC.{% endif %}</p>
-{% elif email_verified %}<p>Only the player from your linked Steam profile will be analyzed.</p><form action="{% url 'steam_login' %}" method="post">{% csrf_token %}<input type="hidden" name="process" value="connect"><input type="hidden" name="next" value="{% url 'account' %}"><button type="submit" class="primary">Link Steam via OpenID</button></form>
-{% else %}<p>Verify your email address before linking Steam.</p>{% endif %}
+<section class="panel"><h2>02 / Demo analysis</h2>
+<p>No Steam sign-in or account linking required. Enter a SteamID64 when uploading each demo.</p>
+{% if last_player_steam_id %}<p>Last used SteamID64: <span class="telemetry cyan">{{ last_player_steam_id }}</span></p><p class="muted">An unverified, editable suggestion for your next upload, not a linked profile.</p>{% endif %}
+<p>{% if paid_plan %}<strong class="green">Pro: unlimited analyses on your account.</strong>{% else %}Free analyses used this UTC calendar month: <strong>{{ quota_used }}/{{ quota_limit }}</strong>. Resets on the first day of each month at 00:00 UTC.{% endif %}</p>
 </section>
 </div>
 <section class="panel" id="billing">
   <span class="eyebrow">SUBSCRIPTION / STRIPE BILLING</span>
   <h2>Pro / $7.99/month</h2>
-  <p>Unlimited analyses for <strong>your linked SteamID</strong>.
+  <p>Unlimited analyses on <strong>your account</strong>.
     Free includes 3 analyses per UTC calendar month.
-    Both plans have a 1 GiB file limit, one active upload or analysis per SteamID, and one analysis running at a time across the service.</p>
+    Both plans have a 1 GiB file limit, one active upload or analysis per account, and one analysis running at a time across the service. Changing SteamID does not reset your limit.</p>
   {% if paid_plan %}
     <p class="notice success">Pro is active. Paid access until {{ billing.paid_until|date:"j M Y, H:i" }} UTC.</p>
   {% else %}
@@ -25,7 +25,7 @@
     {% if billing.cancel_at_period_end %}<p class="warning">Your subscription will end after the current paid period.</p>{% endif %}
     {% if billing.synced_at %}<p class="muted">Status last confirmed: {{ billing.synced_at|date:"j M Y, H:i" }} UTC.</p>{% endif %}
   {% endif %}
-  {% if email_verified and steam_identity %}
+  {% if email_verified %}
     <div class="actions">
       {% if not paid_plan %}<form action="{% url 'billing_checkout' %}" method="post">{% csrf_token %}<button class="primary" type="submit">Subscribe to Pro / $7.99/month</button></form>{% endif %}
       {% if billing.customer_id %}
@@ -33,11 +33,11 @@
         <form action="{% url 'billing_refresh' %}" method="post">{% csrf_token %}<button type="submit">Refresh payment status</button></form>
       {% endif %}
     </div>
-  {% else %}<p>Verify your email and link Steam before subscribing.</p>{% endif %}
+  {% else %}<p>Verify your email before subscribing.</p>{% endif %}
   <p class="muted">Stripe handles payments and card details. Your subscription renews monthly.
     Cancellation takes effect at the end of the paid period. A failed renewal does not extend access.
     When paid access ends, Free limits apply again. Analyses already started are not interrupted.</p>
 </section>
-<section class="panel"><h2>Your data</h2><p>Your raw demo is deleted after the first analysis attempt. Reports, selections and self-reported practice ratings stay until you delete them. We do not use them to train models.</p><p>After account deletion, a minimal record of your SteamID and quota usage remains until the end of the current UTC month. Creating a new account does not reset your quota or release an active Steam link. A minimal Stripe customer reference remains to handle delayed events and payment cancellation. The payment provider retains billing records.</p></section>
+<section class="panel"><h2>Your data</h2><p>Your raw demo is deleted after the first analysis attempt. Reports, selections and self-reported practice ratings stay until you delete them. We do not use them to train models.</p><p>We store the SteamID for each analysis and your last used ID as a suggestion on your account. Neither verifies profile ownership. Reports are private to the account that uploaded the demo, even if another account enters the same SteamID.</p><p>Deleting your account removes the suggestion and results. Minimal upload records, including the selected SteamID, remain through the current UTC month and until input cleanup succeeds. There is no SteamID lock or cross-account quota. A minimal Stripe customer reference remains to handle delayed events and payment cancellation. The payment provider retains billing records.</p></section>
 {% if email_verified %}<section class="panel danger"><h2>Delete your account and results</h2><p>This cannot be undone. Wait for any active analysis to finish first. Before deleting your account, we immediately cancel your subscription and open checkout sessions, with no automatic refund. If Stripe does not confirm cancellation, your account will not be deleted.</p><form method="post" action="{% url 'remove_account' %}">{% csrf_token %}<label for="delete-password">Confirm your password</label><input id="delete-password" name="password" type="password" autocomplete="current-password" required><label class="check"><input name="confirm" value="yes" type="checkbox" required> I understand that my reports and ratings will be deleted and my subscription canceled, with no automatic refund.</label><button class="destructive" type="submit">Delete my account</button></form></section>{% endif %}
 {% endblock %}

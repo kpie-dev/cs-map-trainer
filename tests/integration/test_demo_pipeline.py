@@ -7,6 +7,7 @@ from collections import Counter
 from pathlib import Path
 from types import SimpleNamespace
 
+import polars as pl
 import pytest
 
 from cs_map_trainer.analysis import analyze, roster
@@ -45,6 +46,7 @@ def test_real_demo_pipeline(demo_path, tmp_path):
         for group in report.groups
     )
     assert report.eligible_candidates > 0
+    assert report.analysis_version == 3
     document = ScenarioDocument.model_validate_json(report.scenario_document.model_dump_json())
     assert report.map == reader.map
     assert all(scenario.map == report.map for scenario in document.scenarios)
@@ -56,10 +58,18 @@ def test_real_demo_pipeline(demo_path, tmp_path):
     assert len(document.scenarios) <= 10
     ticks = sorted({scenario.source.snapshot_tick for scenario in document.scenarios})
     snapshots = reader.snapshots(ticks).to_dicts()
+    native_locations = reader.demo.ticks(props=["m_szLastPlaceName"], players_only=True)
+    native_locations = native_locations.filter(pl.col("tick").is_in(ticks)).to_dicts()
+    assert set(report.scenario_locations) == {
+        scenario.scenario_id for scenario in document.scenarios
+    }
     for scenario in document.scenarios:
         assert scenario.source.snapshot_tick < scenario.source.contact_tick
         assert scenario.source.contact_tick <= scenario.source.death_tick
-        for participant in (scenario.player, scenario.opponent):
+        locations = report.scenario_locations[scenario.scenario_id]
+        assert locations.snapshot_tick == scenario.source.snapshot_tick
+        assert locations.source == "m_szLastPlaceName"
+        for role, participant in (("player", scenario.player), ("opponent", scenario.opponent)):
             reference = next(
                 row
                 for row in snapshots
@@ -82,13 +92,21 @@ def test_real_demo_pipeline(demo_path, tmp_path):
                     yaw = math.degrees(math.atan2(dy, dx))
             assert participant.view_angles.pitch == pytest.approx(pitch)
             assert participant.view_angles.yaw == pytest.approx((yaw + 180) % 360 - 180)
+            native = next(
+                row["m_szLastPlaceName"]
+                for row in native_locations
+                if row["tick"] == scenario.source.snapshot_tick
+                and str(row["steamid"]) == participant.steam_id
+            )
+            assert native, "Expected location coverage in the authorized integration fixture"
+            assert getattr(locations, role) == native.strip()
 
     from cs_map_trainer.web.tasks import run_parser
 
     input_path = tmp_path / "input.dem"
     shutil.copyfile(demo_path, input_path)
     try:
-        worker_report, scripts = run_parser(SimpleNamespace(identity_id=selected_id), tmp_path)
+        worker_report, scripts = run_parser(SimpleNamespace(player_steam_id=selected_id), tmp_path)
     finally:
         input_path.unlink()
         (tmp_path / "result.json").unlink(missing_ok=True)
@@ -96,6 +114,10 @@ def test_real_demo_pipeline(demo_path, tmp_path):
     assert worker_report["eligible_candidates"] == report.eligible_candidates
     assert worker_report["eligible_wins"] == report.eligible_wins
     assert worker_report["scenario_document"] == document.model_dump(mode="json")
+    assert worker_report["scenario_locations"] == {
+        scenario_id: locations.model_dump(mode="json")
+        for scenario_id, locations in report.scenario_locations.items()
+    }
     assert scripts == [
         {
             "scenario_id": scenario.scenario_id,

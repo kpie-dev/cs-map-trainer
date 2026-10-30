@@ -22,7 +22,6 @@ services:
       R2_BUCKET: ""
       R2_ACCESS_KEY_ID: ""
       R2_SECRET_ACCESS_KEY: ""
-      STEAM_API_KEY: ""
       STRIPE_SECRET_KEY: ""
       STRIPE_PRICE_ID: ""
       STRIPE_WEBHOOK_SECRET: ""

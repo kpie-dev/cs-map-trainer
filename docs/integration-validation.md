@@ -1,6 +1,27 @@
 # G1: protokół potwierdzenia importu scenariuszy
 
 Status: **niezweryfikowane**. Dokument jest procedurą, nie dowodem integracji.
+
+## Aktualny kontrakt kont i uploadu
+
+Weryfikacja i powiązywanie Steam są wyłączone. Obowiązuje konto e-mail/hasło
+z potwierdzonym adresem oraz SteamID64 wskazane przy każdym demie. Free
+obejmuje 3 analizy na konto w miesiącu UTC, Pro znosi limit liczby na koncie,
+a aktywny upload i cleanup blokują kolejne zadanie tego konta, nie SteamID.
+Ten sam identyfikator na różnych kontach nie udostępnia raportów.
+Ostatni użyty SteamID jest nieweryfikowaną podpowiedzią zapisaną na koncie.
+Pomoc przy polu zawiera lokalne ilustracje poglądowe, nie autentyczne screeny.
+
+Przed wdrożeniem zastosować nieodwracalną migrację `0007_account_upload_players`
+przy zatrzymanym intake/workerach i po backupie bazy. Odebrać rejestrację/SMTP,
+upload z wpisanym SteamID, brak gracza, retry z niezmienionym SteamID,
+limity przy zmianie gracza, izolację dwóch kont ze wspólnym SteamID,
+modal (klawiatura/mobile), zapis podpowiedzi na innym urządzeniu i billing
+bez Steam. Kontrakt API i procedura wdrożenia są w README.
+
+Poniższe zapisy odbiorów i opisów starszych etapów wspominające Steam OpenID,
+kwoty na SteamID, callback i minimalizację profili są historyczne; nie stanowią
+aktualnych wymagań integracji. Nie wykonujemy już odbioru Steam OpenID/API.
 Bieżący cel MVP to
 [Yprac Hub by Yesber, Workshop ID `3070715607`](https://steamcommunity.com/sharedfiles/filedetails/?id=3070715607),
 z backendem i UI aplikacji, bez własnego serwera/pluginu gry. Wynikiem ma być

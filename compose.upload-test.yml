@@ -1,5 +1,6 @@
 x-local-storage: &local-storage
   R2_ENDPOINT: http://storage:5000
+  R2_PUBLIC_ENDPOINT: ${R2_PUBLIC_ENDPOINT:-http://localhost:5001}
   R2_BUCKET: local-demo-inputs
   R2_ACCESS_KEY_ID: local-upload-test
   R2_SECRET_ACCESS_KEY: ${PGPASSWORD:?Set PGPASSWORD in .env}
@@ -7,6 +8,7 @@ x-local-storage: &local-storage
 services:
   storage:
     image: motoserver/moto@sha256:59a1965d845249b04def37a0e2565f9cc6c44543cb89b68e90f28f344b3b0d1a
+    ports: ["127.0.0.1:5001:5000"]
     environment:
       MOTO_SERVICE: s3
     mem_limit: 2g

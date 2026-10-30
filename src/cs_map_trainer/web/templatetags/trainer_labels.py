@@ -6,6 +6,11 @@ register = template.Library()
 
 
 @register.filter
+def win_rate_percent(value: float) -> str:
+    return f"{value * 100:.1f}".removesuffix(".0") + "%"
+
+
+@register.filter
 def limitation_label(code):
     return LIMITATIONS.get(code, code)
 

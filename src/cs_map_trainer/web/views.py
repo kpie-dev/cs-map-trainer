@@ -1,14 +1,10 @@
 import json
 import logging
-import re
 import uuid
 from functools import wraps
 
-from allauth.socialaccount.providers.steam.views import SteamOpenIDCallbackView, steam_login
-from django.conf import settings
 from django.contrib.auth import logout
 from django.core.exceptions import ImproperlyConfigured
-from django.db import transaction
 from django.http import HttpResponse, JsonResponse
 from django.shortcuts import render
 from django.utils import timezone
@@ -19,7 +15,7 @@ from django.views.decorators.http import require_GET, require_http_methods, requ
 from cs_map_trainer.exporting import ASSUMPTIONS, COMPATIBILITY, EXPORTER_VERSION, SESSION_CHANGES
 
 from .identity import verified_email
-from .models import SteamIdentity, Upload
+from .models import AccountPreferences, Upload
 from .presentation import error_message
 from .services import (
     STORAGE_ERRORS,
@@ -32,20 +28,11 @@ from .services import (
     save_training_selection,
     training_export,
     training_pack,
+    validate_player_steam_id,
 )
 from .storage import R2
 
 logger = logging.getLogger(__name__)
-
-
-class PrivateSteamCallbackView(SteamOpenIDCallbackView):
-    def complete_login(self, login):
-        # allauth's lookup can persist extra_data before pre_social_login runs.
-        login.account.extra_data = {"steamid": login.account.uid}
-        return super().complete_login(login)
-
-
-steam_callback = PrivateSteamCallbackView.as_view()
 
 
 def operation_error(request, code, status):
@@ -94,8 +81,10 @@ def body(request):
 def serialize(upload, *, include_result=False):
     result = {
         "id": str(upload.pk),
+        "player_steam_id": upload.player_steam_id,
         "state": upload.state,
         "created_at": upload.created_at.isoformat(),
+        "expires_at": upload.expires_at.isoformat(),
         "error": upload.error_code or None,
         "cleanup_pending": upload.cleanup_pending,
         "cleanup_error": upload.cleanup_error or None,
@@ -112,7 +101,10 @@ def serialize(upload, *, include_result=False):
 def history(request):
     return JsonResponse(
         {
-            "steam_linked": SteamIdentity.objects.filter(owner=request.user).exists(),
+            "last_player_steam_id": AccountPreferences.objects.filter(owner=request.user)
+            .values_list("last_player_steam_id", flat=True)
+            .first()
+            or "",
             "uploads": [
                 serialize(upload)
                 for upload in Upload.objects.filter(owner=request.user)
@@ -134,8 +126,9 @@ def upload_start(request):
         request_id = uuid.UUID(data["request_id"])
     except (KeyError, ValueError, TypeError, AttributeError) as error:
         raise IntakeError("invalid_request_id", 400) from error
+    player_steam_id = validate_player_steam_id(data.get("player_steam_id"))
     storage = R2()
-    upload = initiate(request.user, request_id, data.get("size_bytes"), storage)
+    upload = initiate(request.user, request_id, data.get("size_bytes"), player_steam_id, storage)
     response = serialize(upload)
     if upload.state == Upload.State.UPLOADING and upload.expires_at > timezone.now():
         response.update(
@@ -229,28 +222,3 @@ def account_delete(request):
     delete_account(request.user)
     logout(request)
     return JsonResponse({"deleted": True})
-
-
-@require_POST
-@private
-def connect_steam(request):
-    if request.POST.get("process") != "connect":
-        raise IntakeError("steam_connect_process_required", 400)
-    if not settings.SOCIALACCOUNT_PROVIDERS["steam"]["APP"]["secret"]:
-        raise IntakeError("steam_not_configured", 503)
-    return steam_login(request)
-
-
-@require_GET
-@private
-@transaction.atomic
-def connected_steam(request):
-    if request.GET.get("openid.op_endpoint") != "https://steamcommunity.com/openid/login":
-        raise IntakeError("invalid_steam_endpoint", 400)
-    claimed = request.GET.get("openid.claimed_id", "")
-    if (
-        not re.fullmatch(r"https://steamcommunity\.com/openid/id/[0-9]{17}", claimed)
-        or request.GET.get("openid.identity") != claimed
-    ):
-        raise IntakeError("invalid_steam_identity", 400)
-    return steam_callback(request)

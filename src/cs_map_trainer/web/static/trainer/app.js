@@ -5,6 +5,18 @@
   const csrf = () => document.querySelector("[name=csrfmiddlewaretoken]")?.value;
   const message = (code) => errors[code] || `The action failed. Error code: ${code}`;
 
+  const guide = document.getElementById("steam-id-guide");
+  const openGuide = document.getElementById("steam-id-guide-open");
+  if (guide && openGuide && typeof HTMLDialogElement !== "undefined") {
+    const close = document.getElementById("steam-id-guide-close");
+    openGuide.addEventListener("click", (event) => {
+      event.preventDefault();
+      guide.showModal();
+      close.focus();
+    });
+    guide.addEventListener("close", () => openGuide.focus());
+  }
+
   async function request(url, data) {
     let response;
     const controller = new AbortController();
@@ -46,16 +58,26 @@
     const submit = document.getElementById("upload-button");
     submit.disabled = false;
     const rights = document.getElementById("upload-rights");
-    const storageKey = `cmt-upload-reservation-${uploadForm.dataset.steamId}`;
+    const steamId = document.getElementById("player-steam-id");
+    steamId.addEventListener("change", () => { steamId.value = steamId.value.trim(); });
+    const storageKey = `cmt-upload-reservation-account-${uploadForm.dataset.accountId}`;
     let file = null;
     let reservation = null;
     let busy = false;
     let persistenceAvailable = true;
     try {
       const saved = JSON.parse(sessionStorage.getItem(storageKey) || "null");
-      if (saved && typeof saved.request_id === "string" && typeof saved.signature === "string") {
-        reservation = saved;
-        feedback.textContent = "You have an unfinished upload. Choose the same file to continue.";
+      if (saved && typeof saved.request_id === "string" && typeof saved.signature === "string"
+        && typeof saved.player_steam_id === "string" && /^[0-9]{17}$/.test(saved.player_steam_id)) {
+        if (Date.parse(saved.expires_at) <= Date.now()) {
+          sessionStorage.removeItem(storageKey);
+          feedback.textContent = "Your saved upload reservation has expired. You can choose a new file and SteamID.";
+        } else {
+          reservation = saved;
+          steamId.value = saved.player_steam_id;
+          steamId.readOnly = true;
+          feedback.textContent = "You have an unfinished upload. Choose the same file to continue with its original SteamID.";
+        }
       }
     } catch (error) {
       persistenceAvailable = false;
@@ -63,6 +85,7 @@
     }
     function remember(value) {
       reservation = value;
+      steamId.readOnly = Boolean(value);
       if (persistenceAvailable) {
         try {
           if (value) sessionStorage.setItem(storageKey, JSON.stringify(value));
@@ -130,29 +153,50 @@
         feedback.textContent = message("upload_rights_confirmation_required");
         return;
       }
+      const playerSteamId = steamId.value.trim();
+      if (!/^[0-9]{17}$/.test(playerSteamId)) {
+        feedback.textContent = message("invalid_player_steam_id");
+        steamId.focus();
+        return;
+      }
+      steamId.value = playerSteamId;
+      if (reservation && reservation.player_steam_id !== playerSteamId) {
+        feedback.textContent = message("idempotency_conflict");
+        return;
+      }
       if (reservation && reservation.signature !== signature(file)) {
         feedback.textContent = "Your unfinished upload belongs to a different file. Choose that file or wait for the reservation to expire (24 hours).";
         return;
       }
-      if (!reservation) {
-        remember({ request_id: crypto.randomUUID(), signature: signature(file), transferred: false });
+      const newReservation = !reservation;
+      if (newReservation) {
+        remember({
+          request_id: crypto.randomUUID(), signature: signature(file),
+          player_steam_id: playerSteamId, transferred: false,
+          expires_at: new Date(Date.now() + 24 * 60 * 60 * 1000).toISOString(),
+        });
       }
       busy = true;
       submit.disabled = true;
       input.disabled = true;
       rights.disabled = true;
+      steamId.disabled = true;
       feedback.textContent = "Checking your upload reservation and permissions…";
+      let accepted = false;
       try {
         const started = await request("/backend/uploads/", {
           request_id: reservation.request_id,
           size_bytes: file.size,
           has_upload_rights: true,
+          player_steam_id: reservation.player_steam_id,
         });
+        accepted = true;
         if (started.state === "uploading") {
           if (!started.upload_url) {
             remember(null);
             throw new Error(message("upload_expired"));
           }
+          remember({ ...reservation, expires_at: started.expires_at });
           if (!reservation.transferred) {
             progress.hidden = false;
             progress.value = 0;
@@ -165,8 +209,9 @@
         remember(null);
         window.location.assign(`/uploads/${started.id}/`);
       } catch (error) {
-        if (["monthly_demo_limit", "active_upload_exists", "input_cleanup_pending",
-          "verified_email_required", "verified_steam_required"].includes(error.code)) {
+        if ((newReservation && !accepted && error.code === "storage_not_configured")
+          || ["monthly_demo_limit", "active_upload_exists", "input_cleanup_pending",
+          "verified_email_required", "invalid_player_steam_id", "upload_expired"].includes(error.code)) {
           remember(null);
         }
         feedback.textContent = error.message;
@@ -176,6 +221,7 @@
         submit.disabled = false;
         input.disabled = false;
         rights.disabled = false;
+        steamId.disabled = false;
       }
     });
   }

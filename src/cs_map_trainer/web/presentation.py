@@ -4,7 +4,7 @@ from django.conf import settings
 
 from .billing import paid_access
 from .identity import verified_email
-from .models import SteamIdentity
+from .models import AccountPreferences
 from .services import quota_used
 
 STATES = {
@@ -18,8 +18,7 @@ STATES = {
 }
 ERRORS = {
     "verified_email_required": "Verify your email address to continue.",
-    "verified_steam_required": "Link your Steam account before uploading a demo.",
-    "steam_not_configured": "Steam linking is not available yet. Contact the administrator.",
+    "invalid_player_steam_id": "Enter a SteamID64 consisting of exactly 17 digits.",
     "monthly_demo_limit": (
         "You have used your 3 free analyses for this UTC calendar month. "
         "Wait until next month or upgrade to Pro."
@@ -54,13 +53,14 @@ ERRORS = {
     "invalid_demo_size": "Choose an uncompressed .dem file between 8 bytes and 1 GiB.",
     "upload_rights_confirmation_required": "Confirm that you have permission to upload this demo.",
     "idempotency_conflict": (
-        "This upload reservation belongs to a different file. Start a new upload."
+        "This upload reservation belongs to a different file or SteamID. Use the original values."
     ),
     "unsupported_or_invalid_demo": (
         "This file is invalid or unsupported. Choose a CS2 demo from Mirage or Dust2."
     ),
     "linked_player_not_in_demo": (
-        "The player linked to your Steam account was not found in this demo."
+        "The selected SteamID was not found in this demo. Check the ID before uploading again. "
+        "This analysis attempt counts toward your monthly limit."
     ),
     "worker_lost": (
         "Analysis was interrupted. It will not restart automatically. Upload again to retry."
@@ -92,11 +92,6 @@ ERRORS = {
     "invalid_json_object": "The request format is invalid. Refresh the page and try again.",
     "invalid_request_id": "The upload request is invalid. Refresh the page and try again.",
     "invalid_export_parameters": "The download options are invalid. Return to the practice page.",
-    "steam_connect_process_required": "Link Steam from your Account page.",
-    "invalid_steam_endpoint": (
-        "The Steam sign-in address is invalid. Try linking from your Account page."
-    ),
-    "invalid_steam_identity": "Your Steam identity could not be verified. Try linking Steam again.",
 }
 LIMITATIONS = {
     "map_geometry_unverified": "Map geometry compatibility has not been verified.",
@@ -201,16 +196,20 @@ def error_message(code):
 
 
 def ui_context(request):
-    identity = None
+    last_player_steam_id = ""
     used = None
     paid = False
     if request.user.is_authenticated:
-        identity = SteamIdentity.objects.filter(owner=request.user).first()
-        if identity:
-            used = quota_used(identity)
-            paid = paid_access(identity)
+        last_player_steam_id = (
+            AccountPreferences.objects.filter(owner=request.user)
+            .values_list("last_player_steam_id", flat=True)
+            .first()
+            or ""
+        )
+        used = quota_used(request.user)
+        paid = paid_access(request.user)
     return {
-        "steam_identity": identity,
+        "last_player_steam_id": last_player_steam_id,
         "email_verified": verified_email(request.user),
         "quota_used": used,
         "quota_limit": settings.DEMO_MONTHLY_LIMIT,

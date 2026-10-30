@@ -23,9 +23,18 @@ class R2:
         ):
             raise ImproperlyConfigured("Configure the private R2 bucket and credentials")
         self.bucket = settings.R2_BUCKET
-        self.client = boto3.client(
+        self.client = self._client(settings.R2_ENDPOINT)
+        self.upload_client = (
+            self._client(settings.R2_PUBLIC_ENDPOINT)
+            if settings.R2_PUBLIC_ENDPOINT
+            else self.client
+        )
+
+    @staticmethod
+    def _client(endpoint):
+        return boto3.client(
             "s3",
-            endpoint_url=settings.R2_ENDPOINT,
+            endpoint_url=endpoint,
             aws_access_key_id=settings.R2_ACCESS_KEY_ID,
             aws_secret_access_key=settings.R2_SECRET_ACCESS_KEY,
             region_name="auto",
@@ -45,7 +54,7 @@ class R2:
         )["UploadId"]
 
     def sign(self, upload):
-        return self.client.generate_presigned_url(
+        return self.upload_client.generate_presigned_url(
             "upload_part",
             Params={
                 "Bucket": self.bucket,

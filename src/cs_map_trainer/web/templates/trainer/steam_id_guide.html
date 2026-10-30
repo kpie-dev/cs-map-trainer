@@ -1,0 +1,20 @@
+{% load static %}
+<dialog id="steam-id-guide" class="steam-id-dialog" aria-labelledby="steam-id-guide-title" aria-describedby="steam-id-guide-description">
+  <form method="dialog" class="actions"><button id="steam-id-guide-close" type="submit" autofocus>Close guide</button></form>
+  <div class="steam-id-guide">
+  <h2 id="steam-id-guide-title">Where can I find my SteamID?</h2>
+  <p id="steam-id-guide-description">You need SteamID64: a 17-digit number, not your nickname, login name, or a custom profile URL.</p>
+  <ol>
+    <li>Open Steam and sign in there. Select your account name in the top-right corner, then <strong>Account details</strong>.
+      <img src="{% static 'trainer/steam-account-menu.svg' %}" width="800" height="270" loading="lazy" alt="Illustration: the account menu in the top-right of Steam, with Account details highlighted.">
+    </li>
+    <li>On Account details, find <strong>Steam ID</strong> below the account heading and copy all 17 digits.
+      <img src="{% static 'trainer/steam-account-id.svg' %}" width="800" height="270" loading="lazy" alt="Illustration: Account details with the Steam ID line highlighted; the example ID is 76561198000000001.">
+    </li>
+    <li>Return here and paste the number into <strong>Player SteamID64</strong>. Check that this player participated in your demo.</li>
+  </ol>
+  <p class="muted">These are simplified illustrations, not screenshots. Names and the example ID are fictional; Steam's appearance may vary. Never share your password, Steam Guard codes, or API key. We do not need them.</p>
+  <p>The ID only selects a player in your demo; it does not verify ownership or give anyone access to your reports. An attempt with a player absent from the demo counts toward your monthly limit.</p>
+  <p><a href="https://help.steampowered.com/en/faqs/view/2816-BE67-5B69-0FEC" target="_blank" rel="noopener noreferrer">Steam Support: SteamID and account names</a></p>
+  </div>
+</dialog>

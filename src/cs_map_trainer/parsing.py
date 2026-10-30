@@ -12,6 +12,7 @@ from cs_map_trainer.scenarios import MapIdentity
 
 PARSER_VERSION = "3.1.1"
 MAX_DEMO_BYTES = 1024**3
+PLACE_NAME_PROPERTY = "m_szLastPlaceName"
 
 
 class DemoError(ValueError):
@@ -58,3 +59,15 @@ class DemoReader:
 
     def snapshots(self, ticks: list[int]) -> pl.DataFrame:
         return self.demo.snapshots(ticks=ticks)
+
+    def locations(self, ticks: list[int]) -> pl.DataFrame:
+        if not ticks:
+            return pl.DataFrame(
+                schema={"tick": pl.Int64, "steamid": pl.UInt64, "last_place_name": pl.String}
+            )
+        frame = self.demo.ticks(props=[PLACE_NAME_PROPERTY], players_only=True)
+        if not {"tick", "steamid", PLACE_NAME_PROPERTY} <= set(frame.columns):
+            raise DemoError("Native location data is missing required columns")
+        return frame.filter(pl.col("tick").is_in(ticks)).select(
+            "tick", "steamid", pl.col(PLACE_NAME_PROPERTY).alias("last_place_name")
+        )

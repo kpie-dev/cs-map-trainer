@@ -11,10 +11,12 @@ from urllib.parse import urlsplit
 
 import requests
 from django.conf import settings
+from django.contrib.auth import get_user_model
 from django.db import transaction
 from django.utils import timezone
 
-from .models import BillingAccount, BillingEvent, SteamIdentity
+from .identity import lock_account
+from .models import BillingAccount, BillingEvent
 from .services import IntakeError
 
 logger = logging.getLogger(__name__)
@@ -132,22 +134,15 @@ def public_origin():
     return origin
 
 
-def paid_access(identity):
+def paid_access(user):
     return (
-        bool(identity.owner_id)
+        bool(user.pk)
         and BillingAccount.objects.filter(
-            owner_id=identity.owner_id,
+            owner_id=user.pk,
             closed=False,
             paid_until__gt=timezone.now(),
         ).exists()
     )
-
-
-def _lock_identity(user):
-    try:
-        return SteamIdentity.objects.select_for_update().get(owner=user)
-    except SteamIdentity.DoesNotExist as error:
-        raise IntakeError("verified_steam_required", 403) from error
 
 
 def _paid_period(stripe, subscription):
@@ -235,7 +230,7 @@ def _hosted_url(value, hostname):
 
 @transaction.atomic
 def checkout(user):
-    identity = _lock_identity(user)
+    lock_account(user)
     stripe = Stripe()
     origin = public_origin()
     account, _ = BillingAccount.objects.select_for_update().get_or_create(owner=user)
@@ -245,7 +240,7 @@ def checkout(user):
         if not account.customer_id:
             customer_key = hmac.new(
                 settings.SECRET_KEY.encode(),
-                f"{identity.pk}:{user.pk}".encode(),
+                f"account:{user.pk}".encode(),
                 hashlib.sha256,
             ).hexdigest()
             customer = stripe.call(
@@ -298,7 +293,7 @@ def checkout(user):
 
 @transaction.atomic
 def reconcile_user(user):
-    _lock_identity(user)
+    lock_account(user)
     account = BillingAccount.objects.select_for_update().filter(owner=user, closed=False).first()
     if account and account.customer_id:
         try:
@@ -311,7 +306,7 @@ def reconcile_user(user):
 
 @transaction.atomic
 def portal(user):
-    _lock_identity(user)
+    lock_account(user)
     account = BillingAccount.objects.select_for_update().filter(owner=user, closed=False).first()
     if not account or not account.customer_id:
         raise IntakeError("billing_customer_required", 409)
@@ -383,7 +378,7 @@ def _cancel_customer(account, stripe):
 
 @transaction.atomic
 def close_account(user):
-    SteamIdentity.objects.select_for_update().filter(owner=user).first()
+    lock_account(user)
     account = BillingAccount.objects.select_for_update().filter(owner=user).first()
     if not account or account.closed:
         return
@@ -432,7 +427,7 @@ def verify_signature(raw, signature):
 def _lock_account(account_id):
     account = BillingAccount.objects.get(pk=account_id)
     if account.owner_id:
-        SteamIdentity.objects.select_for_update().filter(owner_id=account.owner_id).first()
+        get_user_model().objects.select_for_update().filter(pk=account.owner_id).first()
     return BillingAccount.objects.select_for_update().get(pk=account_id)
 
 

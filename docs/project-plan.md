@@ -1,5 +1,25 @@
 # CS2: od przegranego pojedynku do własnego treningu
 
+## Aktualizacja: konta bez weryfikacji Steam
+
+Aktualny kontrakt zastępuje poniższe wcześniejsze ustalenia o Steam OpenID
+i limitach per SteamID: konto e-mail/hasło z potwierdzonym adresem wystarcza do
+uploadu i Pro. SteamID64 podaje się przy każdym demie; ostatnia wartość jest
+edytowalną, nieweryfikowaną podpowiedzią zapisaną na koncie. Pomoc ma instrukcję
+i lokalne ilustracje poglądowe. Steam login/callback i connections są wyłączone.
+
+Free: 3 analizy na konto/miesiąc UTC; Pro: 7,99 USD/mies. bez limitu liczby
+analiz na koncie. Jedno aktywne zadanie na konto i globalne limity parsera
+pozostają. Zmiana SteamID nie resetuje kwoty; ten sam SteamID na innym koncie
+nie udostępnia raportów. Nowe konto dostaje osobny limit; własności profilu
+nie weryfikujemy. Nie dodajemy teraz ochrony przed wieloma kontami.
+
+Migracja `0007_account_upload_players` zachowuje historie, graczy uploadów,
+zużycie przypisane kontom i istniejące subskrypcje, a usuwa `SteamIdentity`.
+Wymaga backupu i przerwy w intake/workerach; jest nieodwracalna.
+Aktualna procedura i kontrakt API: README. Dawne zapisy odbiorów Steam poniżej
+pozostają historią projektu, nie wymaganiem konfiguracji Steam Web API.
+
 ## Kontekst do dalszej pracy
 
 Ten dokument jest trwałym punktem odniesienia dla kolejnych prac nad projektem. Zawiera uzgodniony zakres, rekomendowaną architekturę, ryzyka, założenia kosztowe, źródła i zależności zadań.
@@ -102,10 +122,11 @@ także są już zaimplementowane.
 | Kontrakt scenariuszy | Wersja 1, walidacja typów, pozycji, kątów, ticków, stron i uczestników; syntetyczny przykład | `scenarios.py`, `tests/fixtures/synthetic-scenarios.json` |
 | CLI | `players`, `analyze`, `benchmark`, `validate-scenarios`, `schema`; JSON na stdout lub do nowego pliku bez nadpisywania | `cli.py` |
 | Eksport prototypowy Yprac | `export-scenario`: jedna linia lub opcjonalny CFG; walidacja mapy/broni/liczb, stałe komendy; indeksy gracza i encji `2` jako osobne założenia, orientacja przez `point_teleport`, status `unverified_in_game` | `exporting.py`, `cli.py` |
-| Paczki treningowe | `build-pack`: wybór/odrzucanie po ID, ZIP z manifestem, scenariuszami, instrukcją, osobnymi TXT i opcjonalnym CFG; raport v2 lub dokument v1, zapis bez nadpisywania | `packs.py`, `artifacts.py`, `cli.py` |
+| Paczki treningowe | `build-pack`: wybór/odrzucanie po ID, ZIP z manifestem, scenariuszami, instrukcją, osobnymi TXT i opcjonalnym CFG; raport v2/v3 lub dokument v1, zapis bez nadpisywania | `packs.py`, `artifacts.py`, `cli.py` |
 | Parser | Nieskompresowane CS2 `.dem` do 1 GiB, `de_mirage` i `de_dust2`; skład, rundy, zgony, obrażenia i zbiorcze migawki; hash wejścia i jawne błędy | `parsing.py`, `maps.py` |
 | Analiza | Wspólny tick sprzed obrażeń, pozycje i dostępne kąty obu stron; brakujący pitch/yaw przeciwnika przybliżany kierunkiem ku graczowi z jawnym oznaczeniem; wykluczenia i grupowanie z kontekstem | `analysis.py` |
-| Statystyki | Raport `analysis_version: 2`; porównywalne wygrane i przegrane, liczebność próby, win rate tylko w przefiltrowanych rozstrzygniętych starciach; ranking według liczby porażek | `analysis.py` |
+| Statystyki | Raport `analysis_version: 3` z odczytem starszych v2; porównywalne wygrane i przegrane, liczebność próby, win rate tylko w przefiltrowanych rozstrzygniętych starciach; ranking według liczby porażek | `analysis.py` |
+| Nazwy lokacji | Awpy `m_szLastPlaceName` dla obu uczestników w dokładnym ticku scenariusza, zapis w raporcie v3, czytelne etykiety w UI; bez heurystycznych obszarów XYZ; starsze raporty wymagają ponownego przesłania demka | `parsing.py`, `analysis.py`, `callouts.py`, `web/pages.py` |
 | Benchmark | Każdy przebieg w nowym procesie; czas, CPU, RSS, operacje blokowe I/O, rozmiar JSON, timeout i kontrola identyczności wyników; bez fałszywej deklaracji cold cache | `benchmark.py` |
 | Docker | Wieloetapowy obraz CLI, użytkownik bez roota, zależności wykonawcze z lockfile, dane przez bind mount; bez serwera WWW | `Dockerfile`, `.dockerignore`, `README.md` |
 | Testy i CI | Testy jednostkowe, opt-in integracja na lokalnym demie, workflow lint/format/test/build; zdalny wynik GitHub Actions nie był tu potwierdzany | `tests/`, `.github/workflows/ci.yml` |

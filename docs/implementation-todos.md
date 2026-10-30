@@ -1,11 +1,29 @@
 # Plan wykonawczy i todos do kontynuacji w nowej sesji
 
+## Aktualizacja: upload bez powiązania Steam
+
+Obowiązuje konto e-mail/hasło z potwierdzonym adresem, bez Steam OpenID/API.
+Wymagane SteamID64 wskazuje gracza każdego dema; ostatnia przyjęta wartość
+jest zapisana na koncie jako edytowalna podpowiedź, nie dowód tożsamości.
+Pomoc przy polu używa instrukcji i lokalnych ilustracji, nie screenshotów.
+Free, Pro, aktywne zadania i cleanup są przypisane do konta serwisu;
+3 analizy/miesiąc UTC, Pro 7,99 USD/mies., bez zmian limitów technicznych.
+Identyczne SteamID mogą wystąpić na różnych kontach bez dostępu do cudzych wyników.
+Tworzenie nowych kont daje osobne limity Free; nie ma blokady SteamID.
+
+Przed wdrożeniem zastosować wszystkie migracje, w tym nieodwracalną
+`0007_account_upload_players`, przy zatrzymanym intake/workerach i po backupie.
+Zachować istniejące raporty, oceny, zużycie kont i referencje Stripe.
+Powtórzyć odbiór SMTP/R2/Stripe, formularza i instrukcji SteamID, retry,
+izolacji kont i limitów po zmianie gracza. Starsze zapisy o Steam OpenID,
+minimalizacji profili i limitach per SteamID poniżej są historyczne.
+
 ## Aktualny punkt kontynuacji — po implementacji Dust2 i odbiorze Playwright
 
 Zakończone w kodzie i lokalnym odbiorze: parser/analiza, eksporter i paczki,
 backend, UI, deklarowane oceny/powtórki oraz Stripe Billing.
-**Free: 3 analizy na SteamID w miesiącu kalendarzowym UTC.
-Pro: 7,99 USD/miesiąc bez limitu liczby analiz własnego SteamID.**
+**Free: 3 analizy na konto w miesiącu kalendarzowym UTC.
+Pro: 7,99 USD/miesiąc bez limitu liczby analiz na koncie.**
 Limity techniczne pozostają. Nie wracamy do limitu tygodniowego.
 
 **Nowy zakres do implementacji:** Cache, Dust2, Mirage, Inferno, Nuke,
@@ -20,7 +38,7 @@ końcowym aplikacyjnym E2E. Każda mapa wymaga osobnego odbioru Yprac.
 Następne zadanie: **docelowy odbiór `prepare-deployment`**. Konfiguracja Caddy,
 HTTPS/proxy, statyków i harmonogramu Stripe jest już przygotowana; opis
 lokalnego odbioru znajduje się poniżej. Na VPS zastosować wszystkie migracje
-do `0005_billing_accounts`, odebrać publiczny TLS, a następnie
+do `0007_account_upload_players`, odebrać publiczny TLS, a następnie
 rzeczywiste usługi oraz workera. Stripe wymaga konfiguracji kluczy,
 ceny, portalu, webhooka i okresowego `reconcile_subscriptions`, nie ponownej
 implementacji modułu. Potem techniczne E2E i końcowe próby CS2/Yprac.
