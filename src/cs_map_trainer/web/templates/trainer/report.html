@@ -2,6 +2,7 @@
 {% load trainer_labels %}
 {% block content %}
 <a class="back-link" href="{% url 'history' %}">← My analyses</a>
+{% if team_upload %}<section class="panel"><a href="{% url 'report' upload.pk %}">Team overview</a><h2>{{ player_result.name|default:player_result.steam_id }}</h2>{% include "trainer/player_statistics.html" with statistics=player_result.statistics %}</section>{% endif %}
 <header class="report-heading"><span class="badge cyan">{% if analysis %}{{ analysis.map.name|upper }}{% else %}{{ map_label }}{% endif %}</span><h1>{% if situations %}Choose your duels{% elif analysis %}Analysis report{% else %}Preparing your report{% endif %}</h1><span class="badge warning">NOT VERIFIED IN GAME</span><details><summary>Analysis information</summary><p class="telemetry">{{ upload.pk }} / {{ upload.created_at|date:"j M Y, H:i" }} UTC</p><p>Analyzed SteamID: <strong>{{ upload.player_steam_id }}</strong></p>{% if analysis %}<p>{{ analysis.eligible_candidates }} eligible lost duels / {{ analysis.deaths_considered }} deaths considered. {{ analysis.eligible_wins }} comparable wins / {{ analysis.kills_considered }} kills considered. Omitted by the scenario limit: {{ analysis.omitted_by_limit }}.</p>{% endif %}</details></header>
 {% if active %}
 <section class="panel" id="job-status" data-status-url="/backend/uploads/{{ upload.pk }}/status/" data-state="{{ upload.state }}">
@@ -15,7 +16,7 @@
 {% if situations %}
 <section class="panel selection-panel">
 <p>Each group trains <strong>all similar scenarios</strong>, not only its preview. Weapon-class practice priorities, not proof of mistakes; money and armor are not recorded.</p>
-<form id="selection-form" method="post" action="{% url 'selection' upload.pk %}">{% csrf_token %}<input type="hidden" name="selection_ui" value="groups">
+<form id="selection-form" method="post" action="{{ selection_url }}">{% csrf_token %}<input type="hidden" name="selection_ui" value="groups">
 <div class="selection-actions"><div class="actions"><button type="submit" class="primary" name="intent" value="download">Download training (.zip)</button><button type="submit" name="intent" value="practice">Open practice</button></div><p><strong id="group-count">{{ selected_group_count }}</strong> / {{ training_groups|length }} groups · <strong id="selection-count">{{ selected_count }}</strong> / {{ situations|length }} scenarios · CFG + TXT</p><p id="selection-feedback" role="status">{% if selection_error %}{{ selection_error }}{% endif %}</p></div>
 <div class="actions selection-tools"><button type="button" id="select-all" hidden>Select all</button><button type="button" id="clear-selection" hidden>Clear selection</button></div>
 {% for group in training_groups %}<article class="situation" data-members="{% for item in group.members %}{{ item.scenario.scenario_id }}{% if not forloop.last %} {% endif %}{% endfor %}">

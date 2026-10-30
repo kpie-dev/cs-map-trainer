@@ -7,6 +7,8 @@ urlpatterns = [
     path("", pages.home, name="home"),
     path("account/", pages.account, name="account"),
     path("account/billing/checkout/", pages.billing_checkout, name="billing_checkout"),
+    path("account/billing/change/", pages.billing_change, name="billing_change"),
+    path("account/team/", pages.team_save, name="team_save"),
     path("account/billing/portal/", pages.billing_portal, name="billing_portal"),
     path("account/billing/refresh/", pages.billing_refresh, name="billing_refresh"),
     path("account/billing/return/", pages.billing_return, name="billing_return"),
@@ -14,6 +16,26 @@ urlpatterns = [
     path("account/delete/", pages.remove_account, name="remove_account"),
     path("history/", pages.history, name="history"),
     path("uploads/<uuid:upload_id>/", pages.report, name="report"),
+    path(
+        "uploads/<uuid:upload_id>/players/<str:steam_id>/",
+        pages.report,
+        name="player_report",
+    ),
+    path(
+        "uploads/<uuid:upload_id>/players/<str:steam_id>/selection/",
+        pages.selection,
+        name="player_selection",
+    ),
+    path(
+        "uploads/<uuid:upload_id>/players/<str:steam_id>/training/",
+        pages.training,
+        name="player_training",
+    ),
+    path(
+        "uploads/<uuid:upload_id>/players/<str:steam_id>/scenarios/<str:scenario_id>/review/",
+        pages.review,
+        name="player_review",
+    ),
     path("uploads/<uuid:upload_id>/selection/", pages.selection, name="selection"),
     path("uploads/<uuid:upload_id>/delete/", pages.remove_upload, name="remove_upload"),
     path("uploads/<uuid:upload_id>/training/", pages.training, name="training"),
@@ -32,6 +54,18 @@ urlpatterns = [
     path("backend/uploads/<uuid:upload_id>/status/", views.upload_status),
     path("backend/uploads/<uuid:upload_id>/", views.upload_detail),
     path("backend/uploads/<uuid:upload_id>/selection/", views.upload_selection),
+    path(
+        "backend/uploads/<uuid:upload_id>/players/<str:steam_id>/selection/",
+        views.upload_selection,
+    ),
+    path(
+        "backend/uploads/<uuid:upload_id>/players/<str:steam_id>/pack/",
+        views.upload_pack,
+    ),
+    path(
+        "backend/uploads/<uuid:upload_id>/players/<str:steam_id>/scenarios/<str:scenario_id>/export/",
+        views.upload_export,
+    ),
     path("backend/uploads/<uuid:upload_id>/pack/", views.upload_pack),
     path(
         "backend/uploads/<uuid:upload_id>/scenarios/<str:scenario_id>/export/",

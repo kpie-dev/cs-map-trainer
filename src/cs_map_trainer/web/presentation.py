@@ -5,7 +5,7 @@ from django.conf import settings
 from cs_map_trainer.maps import SUPPORTED_MAP_LABELS, SUPPORTED_MAP_NAMES
 
 from .billing import paid_access
-from .entitlements import manual_access, monthly_limit
+from .entitlements import coach_access, manual_access, monthly_limit
 from .identity import verified_email
 from .models import AccountPreferences
 from .services import quota_used
@@ -23,15 +23,34 @@ ERRORS = {
     "verified_email_required": "Verify your email address to continue.",
     "account_blocked": "Your account is blocked. Contact support.",
     "invalid_player_steam_id": "Enter a SteamID64 consisting of exactly 17 digits.",
+    "coach_required": "An active Coach subscription is required for this action.",
+    "invalid_analysis_mode": "Choose individual or team analysis.",
+    "invalid_team_roster": "Enter 1 to 5 unique SteamID64s and names of at most 64 characters.",
+    "team_roster_required": "Save a team with 1 to 5 players in your account before uploading.",
+    "player_required": "Choose a player in the team report first.",
+    "player_not_found": "This player was not found in your analysis.",
+    "player_not_in_demo": "This player is not present in the demo.",
+    "team_players_not_in_demo": "None of your team's SteamIDs was found in the demo.",
     "monthly_demo_limit": (
         "You have used your free analysis allowance for this UTC calendar month. "
         "Wait until next month or upgrade to Pro."
     ),
     "billing_not_configured": "Payments are not available yet. Contact the administrator.",
+    "invalid_billing_plan": "Choose Pro or Coach.",
+    "billing_period_mismatch": "Your renewal period changed. Refresh payment status and retry.",
+    "billing_schedule_exists": (
+        "Your subscription already has a schedule requiring review. Contact support."
+    ),
+    "billing_paid_subscription_required": (
+        "An active paid subscription is required to change plans."
+    ),
+    "billing_subscription_change_unavailable": (
+        "Your subscription cannot change plans right now. Refresh its status or contact support."
+    ),
     "billing_unavailable": "Stripe is unavailable. The action was not confirmed. Please try again.",
     "billing_invalid_response": "We could not confirm Stripe's response. Please try again later.",
     "billing_price_mismatch": (
-        "The Stripe price does not match the $7.99/month plan. Contact the administrator."
+        "The Stripe price does not match the selected monthly plan. Contact the administrator."
     ),
     "billing_portal_mismatch": (
         "The billing portal is not configured correctly. Contact the administrator."
@@ -206,6 +225,7 @@ def ui_context(request):
     paid = False
     manual = False
     manual_until = None
+    coach = False
     limit = settings.DEMO_MONTHLY_LIMIT
     if request.user.is_authenticated:
         last_player_steam_id = (
@@ -216,6 +236,7 @@ def ui_context(request):
         )
         used = quota_used(request.user)
         paid = paid_access(request.user)
+        coach = coach_access(request.user)
         manual = manual_access(request.user)
         limit = monthly_limit(request.user)
         if manual:
@@ -236,6 +257,7 @@ def ui_context(request):
         "quota_remaining": max(0, limit - used) if used is not None else None,
         "paid_plan": paid or manual,
         "stripe_paid_plan": paid,
+        "coach_plan": coach,
         "manual_pro": manual,
         "manual_pro_until": manual_until,
         "ui_errors": errors,

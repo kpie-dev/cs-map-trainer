@@ -30,6 +30,8 @@ def stripe(settings):
     settings.STRIPE_SECRET_KEY = "test-only-stripe-key"
     settings.STRIPE_WEBHOOK_SECRET = "test-only-webhook-secret"
     settings.STRIPE_PRICE_ID = "price_monthly"
+    settings.STRIPE_COACH_PRICE_ID = "price_coach"
+    settings.STRIPE_LEGACY_PRO_PRICE_ID = "price_legacy"
     settings.STRIPE_PORTAL_CONFIGURATION_ID = "bpc_monthly"
     settings.PUBLIC_BASE_URL = "https://trainer.example.test"
     now = timezone.now()
@@ -38,24 +40,26 @@ def stripe(settings):
             "id": "price_monthly",
             "active": True,
             "currency": "usd",
-            "unit_amount": 799,
+            "unit_amount": 499,
             "type": "recurring",
             "recurring": {"interval": "month", "interval_count": 1, "usage_type": "licensed"},
         },
         subscriptions=[],
+        schedules=[],
+        created_schedule_keys={},
         invoices=[
             {
                 "id": "in_paid",
                 "customer": "cus_fixture",
                 "status": "paid",
                 "currency": "usd",
-                "amount_paid": 799,
+                "amount_paid": 499,
             }
         ],
         lines=[
             {
                 "id": "il_paid",
-                "amount": 799,
+                "amount": 499,
                 "pricing": {"price_details": {"price": "price_monthly"}},
                 "period": {"start": int(now.timestamp()) - 100, "end": int(now.timestamp()) + 3600},
             }
@@ -79,10 +83,75 @@ def stripe(settings):
         path = url.removeprefix("https://api.stripe.com/v1/")
         if path == "prices/price_monthly":
             result = state.price
+        elif path == "prices/price_coach":
+            result = {**state.price, "id": "price_coach", "unit_amount": 1999}
         elif path == "customers":
             result = {"id": "cus_fixture"}
         elif path == "subscriptions":
             result = {"data": state.subscriptions, "has_more": False}
+        elif path == "subscription_schedules" and method == "GET":
+            result = {"data": state.schedules, "has_more": False}
+        elif path == "subscription_schedules" and method == "POST":
+            sub = next(
+                item
+                for item in state.subscriptions
+                if item["id"] == kwargs["data"]["from_subscription"]
+            )
+            item = sub["items"]["data"][0]
+            key = kwargs["headers"]["Idempotency-Key"]
+            if key in state.created_schedule_keys:
+                existing = next(
+                    item
+                    for item in state.schedules
+                    if item["id"] == state.created_schedule_keys[key]
+                )
+                return Mock(status_code=200, json=Mock(return_value=deepcopy(existing)))
+            if sub.get("schedule"):
+                return Mock(
+                    status_code=400,
+                    json=Mock(return_value={"error": {"code": "subscription_schedule_exists"}}),
+                )
+            result = {
+                "id": "sub_sched_fixture",
+                "customer": sub["customer"],
+                "subscription": sub["id"],
+                "status": "active",
+                "metadata": {},
+                "current_phase": {
+                    "start_date": item["current_period_start"],
+                    "end_date": item["current_period_end"],
+                },
+                "phases": [],
+            }
+            sub["schedule"] = result["id"]
+            state.schedules.append(result)
+            state.created_schedule_keys[key] = result["id"]
+        elif path.startswith("subscription_schedules/"):
+            result = next(item for item in state.schedules if item["id"] == path.split("/")[1])
+            if path.endswith("/release"):
+                result["status"] = "released"
+                for sub in state.subscriptions:
+                    sub["schedule"] = None
+            elif path.endswith("/cancel"):
+                result["status"] = "canceled"
+                for sub in state.subscriptions:
+                    if sub.get("schedule") == result["id"]:
+                        sub["status"] = "canceled"
+            elif method == "POST":
+                data = kwargs["data"]
+                result["metadata"] = {"application": data["metadata[application]"]}
+                result["phases"] = [
+                    {
+                        "start_date": data[f"phases[{i}][start_date]"],
+                        "items": [
+                            {
+                                "price": data[f"phases[{i}][items][0][price]"],
+                                "quantity": 1,
+                            }
+                        ],
+                    }
+                    for i in (0, 1)
+                ]
         elif path.startswith("subscriptions/") and method == "DELETE":
             sub = next(item for item in state.subscriptions if item["id"] == path.split("/")[1])
             sub["status"] = "canceled"
@@ -117,14 +186,26 @@ def account(user):
     return BillingAccount.objects.create(owner=user, customer_id="cus_fixture")
 
 
-def subscription(status="active"):
+def subscription(status="active", price="price_monthly"):
+    now = int(timezone.now().timestamp())
     return {
         "id": "sub_fixture",
         "customer": "cus_fixture",
         "status": status,
         "created": 100,
         "cancel_at_period_end": False,
-        "items": {"data": [{"price": {"id": "price_monthly"}, "quantity": 1}], "has_more": False},
+        "items": {
+            "data": [
+                {
+                    "id": "si_fixture",
+                    "price": {"id": price},
+                    "quantity": 1,
+                    "current_period_start": now - 120,
+                    "current_period_end": now + 3600,
+                }
+            ],
+            "has_more": False,
+        },
     }
 
 
@@ -562,7 +643,7 @@ def test_account_ui_shows_paid_plan_without_network_on_get(api, account, stripe)
     account.save()
     response = api.get("/account/")
     assert "Pro is active" in response.content.decode()
-    assert "$7.99/month" in response.content.decode()
+    assert "$4.99/month" in response.content.decode()
     assert "UNLIMITED" in response.content.decode()
     assert "7 DAYS" not in response.content.decode()
     stripe.request.assert_not_called()

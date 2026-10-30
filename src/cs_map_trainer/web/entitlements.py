@@ -20,3 +20,9 @@ def pro_access(user):
     from .billing import paid_access
 
     return paid_access(user) or manual_access(user)
+
+
+def coach_access(user):
+    from .billing import coach_access as paid_coach_access
+
+    return paid_coach_access(user)

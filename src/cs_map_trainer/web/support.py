@@ -84,7 +84,15 @@ def policy_snapshot(user, policy):
     }
     billing_account = (
         BillingAccount.objects.filter(owner=user)
-        .values("status", "paid_until", "cancel_at_period_end", "synced_at")
+        .values(
+            "status",
+            "plan",
+            "paid_until",
+            "cancel_at_period_end",
+            "synced_at",
+            "scheduled_plan",
+            "scheduled_at",
+        )
         .first()
     )
     if billing_account:

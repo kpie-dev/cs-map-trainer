@@ -1,5 +1,15 @@
 # CS2: od przegranego pojedynku do własnego treningu
 
+## Aktualizacja: pakiet Trener
+
+Aktualny cennik: **Pro 4,99 USD/mies.; Trener 19,99 USD/mies.**, Free bez zmian.
+Trener obejmuje jeden edytowalny skład 1–5 SteamID64, niezmienny snapshot przy
+uploadzie, statystyki per zawodnik i trening zawodnik → grupy → akcje.
+Estimated Rating 2.0 jest jawnym przybliżeniem, nie oficjalnym ratingiem HLTV.
+Zmiany abonamentu oraz obniżka obecnego Pro obowiązują od odnowienia.
+Szczegóły kontraktów, migracji i wdrożenia są w README. Wzmianki o 7,99 USD
+niżej opisują poprzedni model lub historyczne odbiory, nie bieżący cennik.
+
 ## Panel obsługi kont
 
 Panel `/admin/` opiera się na ograniczonym Django Admin, MFA allauth i rolach

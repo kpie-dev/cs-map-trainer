@@ -163,7 +163,8 @@ def test_account_uses_english_price_and_unambiguous_dates(api, user):
     BillingAccount.objects.create(owner=user, synced_at=synced)
     response = api.get("/account/", HTTP_ACCEPT_LANGUAGE="pl")
     text = response.content.decode()
-    assert "Pro / $7.99/month" in text
+    assert "Pro / $4.99/month" in text
+    assert "Coach / $19.99/month" in text
     assert f"Status last confirmed: {date_format(synced, 'j M Y, H:i')} UTC." in text
 
 

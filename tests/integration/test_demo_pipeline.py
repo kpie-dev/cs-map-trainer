@@ -6,6 +6,7 @@ import shutil
 from collections import Counter
 from pathlib import Path
 from types import SimpleNamespace
+from unittest.mock import Mock
 
 import polars as pl
 import pytest
@@ -126,3 +127,34 @@ def test_real_demo_pipeline(demo_path, tmp_path):
         }
         for scenario in document.scenarios
     ]
+
+
+def test_real_team_pipeline_uses_one_extraction_and_complete_native_metrics(demo_path):
+    from cs_map_trainer.team_analysis import TeamAnalysisResult, analyze_team
+
+    reader = DemoReader(demo_path)
+    steam_ids = [str(row["steamid"]) for row in reader.players().to_dicts() if row["steamid"]][:5]
+    assert len(steam_ids) == 5
+    for name in ("players", "combat", "snapshots", "locations"):
+        setattr(reader, name, Mock(wraps=getattr(reader, name)))
+    result = analyze_team(reader, steam_ids)
+    assert result.error is None
+    assert [player.steam_id for player in result.players] == steam_ids
+    for name in ("players", "combat", "snapshots", "locations"):
+        getattr(reader, name).assert_called_once()
+    assert reader.tick_rate > 0
+    for player in result.players:
+        assert player.status == "ready"
+        stats = player.statistics
+        assert stats.rounds_played > 0
+        for field in ("kills", "deaths", "assists", "adr", "kast", "estimated_rating_2"):
+            assert getattr(stats, field) is not None, stats.unavailable
+        if stats.kills:
+            assert stats.hs_percent is not None
+        if player.report.scenario_document:
+            assert len(player.report.scenario_document.scenarios) <= 10
+    TeamAnalysisResult.model_validate_json(result.model_dump_json())
+    reference = analyze(lambda: reader, steam_ids[0])
+    assert result.players[0].report.model_dump(exclude={"metrics"}) == reference.model_dump(
+        exclude={"metrics"}
+    )

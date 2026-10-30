@@ -15,6 +15,7 @@
   {% else %}
     <form id="upload-form" method="post" data-account-id="{{ user.pk }}">
       {% csrf_token %}
+      <label for="analysis-mode">Analysis mode</label><select id="analysis-mode" name="mode"><option value="individual">Individual player</option>{% if coach_plan %}<option value="team">Saved team (up to 5 players)</option>{% endif %}</select>{% if coach_plan %}<p class="muted">Team mode uses the roster saved in <a href="{% url 'account' %}#team">your account</a>.</p>{% endif %}
       <label for="player-steam-id">Player SteamID64</label>
       <input id="player-steam-id" name="player_steam_id" type="text" inputmode="numeric" pattern="[0-9]{17}" required value="{{ last_player_steam_id }}" aria-describedby="steam-id-help" autocomplete="off">
       <p id="steam-id-help" class="muted">Enter the 17-digit SteamID of the player to analyze. We remember your last used ID as an editable suggestion, not a verified profile. No Steam sign-in required.</p>
@@ -35,8 +36,8 @@
       <noscript><p class="notice">JavaScript is required to upload a demo. You can still view your history and reports without it.</p></noscript>
     </form>
   {% endif %}
-  <div class="quota-strip"><span>Free: <strong>{% if user.is_authenticated %}{{ quota_limit }}{% else %}3{% endif %} analyses per account per UTC calendar month</strong><br>Pro: <strong>$7.99/month / unlimited analyses on your account</strong></span><span class="cyan">{% if paid_plan %}Pro active / unlimited{% elif user.is_authenticated %}{{ quota_used }}/{{ quota_limit }} used{% else %}Verified email required{% endif %}</span></div>
-  <p class="muted">Both plans: up to 1 GiB per file and one active upload or analysis per account. Changing SteamID does not reset your limit. <a href="{% url 'account' %}#billing">Plans and billing</a></p>
+  <div class="quota-strip"><span>Free: <strong>{% if user.is_authenticated %}{{ quota_limit }}{% else %}3{% endif %} analyses per account per UTC calendar month</strong><br>Pro: <strong>$4.99/month / unlimited analyses on your account</strong><br>Coach: <strong>$19.99/month / Pro + one team of up to 5 players</strong></span><span class="cyan">{% if coach_plan %}Coach active / unlimited{% elif paid_plan %}Pro active / unlimited{% elif user.is_authenticated %}{{ quota_used }}/{{ quota_limit }} used{% else %}Verified email required{% endif %}</span></div>
+  <p class="muted">All plans: up to 1 GiB per file and one active upload or analysis per account. Changing SteamID does not reset your limit. <a href="{% url 'account' %}#billing">Plans and billing</a></p>
 </section>
 {% include "trainer/steam_id_guide.html" %}
 <section class="steps">

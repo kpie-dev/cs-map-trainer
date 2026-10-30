@@ -69,6 +69,7 @@ class RoundRow(ParserRow):
     freeze_end_tick: int | None
     end_tick: int | None
     is_knife_round: bool | None = None
+    is_warmup: bool = False
 
 
 class DamageRow(ParserRow):
@@ -238,7 +239,11 @@ class AnalysisReport(ContractModel):
         return self
 
 
-def _scenario_locations(reader: Reader, scenarios: list[Scenario]) -> dict[str, ScenarioLocations]:
+def _scenario_locations(
+    reader: Reader,
+    scenarios: list[Scenario],
+    frame: pl.DataFrame | None = None,
+) -> dict[str, ScenarioLocations]:
     if not scenarios:
         return {}
     needed = {
@@ -248,7 +253,7 @@ def _scenario_locations(reader: Reader, scenarios: list[Scenario]) -> dict[str, 
     }
     ticks = sorted({tick for tick, _ in needed})
     locations: dict[tuple[int, int], str | None] = {}
-    for row in reader.locations(ticks).to_dicts():
+    for row in (frame if frame is not None else reader.locations(ticks)).to_dicts():
         if (row.get("tick"), row.get("steamid")) not in needed:
             continue
         location = LocationRow.model_validate(row)
@@ -310,6 +315,8 @@ def _kill_exclusion(kill: KillRow, round_row: RoundRow | None) -> str | None:
         return "outside_live_round"
     if round_row.is_knife_round is True:
         return "knife_round"
+    if round_row.is_warmup:
+        return "warmup_round"
     if not kill.attacker_steamid or kill.attacker_steamid == kill.victim_steamid:
         return "world_or_suicide"
     if kill.attacker_side not in SIDES or kill.victim_side not in SIDES:
@@ -352,31 +359,33 @@ def analyze(
     contact_window_ticks: int = 128,
     group_cell_units: float = 256.0,
 ) -> AnalysisReport:
-    started, cpu_started = time.perf_counter(), time.process_time()
+    started = time.perf_counter(), time.process_time()
+    _validate_parameters(max_scenarios, contact_window_ticks, group_cell_units)
+    return _analyze(
+        open_reader(),
+        steam_id,
+        max_scenarios=max_scenarios,
+        contact_window_ticks=contact_window_ticks,
+        group_cell_units=group_cell_units,
+        started=started,
+    )
+
+
+def _validate_parameters(max_scenarios: int, contact_window_ticks: int, group_cell_units: float):
     if max_scenarios < 1 or contact_window_ticks < 1:
         raise DemoError("Scenario limit and contact window must be positive")
     if not math.isfinite(group_cell_units) or group_cell_units <= 0:
         raise DemoError("Group cell size must be finite and positive")
-    reader = open_reader()
-    if steam_id not in {player.steam_id for player in roster(reader).players}:
-        raise DemoError("Selected SteamID is not in this demo's roster")
-    rounds_frame, kills_frame, damages_frame = reader.combat()
-    rounds = [RoundRow.model_validate(row) for row in rounds_frame.to_dicts()]
-    kills = [KillRow.model_validate(row) for row in kills_frame.to_dicts()]
-    kills = [
-        kill
-        for kill in kills
-        if str(kill.victim_steamid) == steam_id or str(kill.attacker_steamid) == steam_id
-    ]
-    damages = [DamageRow.model_validate(row) for row in damages_frame.to_dicts()]
-    excluded: list[ExcludedDuel] = []
-    excluded_wins: list[ExcludedDuel] = []
 
-    def reject(kill: KillRow, reason: str) -> None:
-        target = excluded if str(kill.victim_steamid) == steam_id else excluded_wins
-        target.append(ExcludedDuel(death_tick=kill.tick, reason=reason))
 
-    candidates: list[tuple[KillRow, RoundRow, int]] = []
+def _candidates(
+    rounds: list[RoundRow],
+    kills: list[KillRow],
+    damages: list[DamageRow],
+    contact_window_ticks: int,
+    reject: Callable[[KillRow, str], None],
+) -> list[tuple[KillRow, RoundRow, int]]:
+    candidates = []
     for kill in sorted(kills, key=lambda kill: kill.tick):
         round_row = _round_for(kill.tick, rounds)
         reason = _kill_exclusion(kill, round_row)
@@ -408,6 +417,45 @@ def analyze(
             reject(kill, "multi_party_damage")
             continue
         candidates.append((kill, round_row, contact))
+    return candidates
+
+
+def _analyze(
+    reader: Reader,
+    steam_id: str,
+    *,
+    max_scenarios: int = 10,
+    contact_window_ticks: int = 128,
+    group_cell_units: float = 256.0,
+    prepared: tuple[list[RoundRow], list[KillRow], list[DamageRow]] | None = None,
+    snapshot_frame: pl.DataFrame | None = None,
+    defer_locations: bool = False,
+    started: tuple[float, float] | None = None,
+) -> AnalysisReport:
+    started, cpu_started = started or (time.perf_counter(), time.process_time())
+    _validate_parameters(max_scenarios, contact_window_ticks, group_cell_units)
+    if prepared is None:
+        if steam_id not in {player.steam_id for player in roster(reader).players}:
+            raise DemoError("Selected SteamID is not in this demo's roster")
+        rounds_frame, kills_frame, damages_frame = reader.combat()
+        rounds = [RoundRow.model_validate(row) for row in rounds_frame.to_dicts()]
+        kills = [KillRow.model_validate(row) for row in kills_frame.to_dicts()]
+        damages = [DamageRow.model_validate(row) for row in damages_frame.to_dicts()]
+    else:
+        rounds, kills, damages = prepared
+    kills = [
+        kill
+        for kill in kills
+        if str(kill.victim_steamid) == steam_id or str(kill.attacker_steamid) == steam_id
+    ]
+    excluded: list[ExcludedDuel] = []
+    excluded_wins: list[ExcludedDuel] = []
+
+    def reject(kill: KillRow, reason: str) -> None:
+        target = excluded if str(kill.victim_steamid) == steam_id else excluded_wins
+        target.append(ExcludedDuel(death_tick=kill.tick, reason=reason))
+
+    candidates = _candidates(rounds, kills, damages, contact_window_ticks, reject)
 
     ticks = sorted({contact - 1 for _, _, contact in candidates})
     needed = {
@@ -417,7 +465,8 @@ def analyze(
     }
     snapshots: dict[tuple[int, int], SnapshotRow] = {}
     if ticks:
-        for row in reader.snapshots(ticks).to_dicts():
+        frame = snapshot_frame if snapshot_frame is not None else reader.snapshots(ticks)
+        for row in frame.to_dicts():
             if (row.get("tick"), row.get("steamid")) not in needed:
                 continue
             snapshot = SnapshotRow.model_validate(row)
@@ -497,7 +546,7 @@ def analyze(
     )
     selected = [scenario for key in ordered for scenario in grouped.get(key, [])][:max_scenarios]
     selected_ids = {scenario.scenario_id for scenario in selected}
-    scenario_locations = _scenario_locations(reader, selected)
+    scenario_locations = {} if defer_locations else _scenario_locations(reader, selected)
     groups: list[DuelGroup] = []
     for index, key in enumerate(ordered, start=1):
         losses, victories = grouped.get(key, []), grouped_wins.get(key, [])
@@ -523,16 +572,6 @@ def analyze(
                 ],
             )
         )
-    rss = None
-    input_blocks = output_blocks = None
-    if sys.platform != "win32":
-        import resource
-
-        usage = resource.getrusage(resource.RUSAGE_SELF)
-        rss = usage.ru_maxrss
-        input_blocks, output_blocks = usage.ru_inblock, usage.ru_oublock
-        if sys.platform != "darwin":
-            rss *= 1024
     return AnalysisReport(
         status="candidates_ready" if selected else "no_eligible_duels",
         parser_version=PARSER_VERSION,
@@ -563,15 +602,29 @@ def analyze(
             "grid_groups_are_heuristic",
             "console_export_not_verified",
         ],
-        metrics=Metrics(
-            wall_seconds=time.perf_counter() - started,
-            cpu_seconds=time.process_time() - cpu_started,
-            process_peak_rss_bytes=rss,
-            rss_scope="process_lifetime" if rss is not None else "unavailable_on_platform",
-            input_block_operations=input_blocks,
-            output_block_operations=output_blocks,
-            input_bytes=reader.size_bytes,
-        ),
+        metrics=_metrics(reader, (started, cpu_started)),
+    )
+
+
+def _metrics(reader: Reader, started: tuple[float, float]) -> Metrics:
+    rss = None
+    input_blocks = output_blocks = None
+    if sys.platform != "win32":
+        import resource
+
+        usage = resource.getrusage(resource.RUSAGE_SELF)
+        rss = usage.ru_maxrss
+        input_blocks, output_blocks = usage.ru_inblock, usage.ru_oublock
+        if sys.platform != "darwin":
+            rss *= 1024
+    return Metrics(
+        wall_seconds=time.perf_counter() - started[0],
+        cpu_seconds=time.process_time() - started[1],
+        process_peak_rss_bytes=rss,
+        rss_scope="process_lifetime" if rss is not None else "unavailable_on_platform",
+        input_block_operations=input_blocks,
+        output_block_operations=output_blocks,
+        input_bytes=reader.size_bytes,
     )
 
 

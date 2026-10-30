@@ -17,7 +17,7 @@ from django.utils import timezone
 from cs_map_trainer.analysis import AnalysisReport
 from cs_map_trainer.exporting import ExportError, export_scenario
 
-from .models import Upload
+from .models import PlayerAnalysis, Upload
 from .processes import parser_slot
 from .services import STORAGE_ERRORS, TERMINAL, dispatch, month_start
 from .storage import R2, InvalidUpload
@@ -48,7 +48,11 @@ def run_parser(upload, directory, *, lock_fd=None):
             "-m",
             "cs_map_trainer.web.processor",
             str(directory / "input.dem"),
-            upload.player_steam_id,
+            (
+                json.dumps(list(upload.player_results.values_list("steam_id", flat=True)))
+                if getattr(upload, "mode", "individual") == "team"
+                else upload.player_steam_id
+            ),
             str(output),
         ],
         env,
@@ -58,18 +62,30 @@ def run_parser(upload, directory, *, lock_fd=None):
         raise ValueError("Parser output exceeds its budget")
     result = json.loads(output.read_text())
     if result.get("error"):
-        if result["error"] == "linked_player_not_in_demo":
+        if result["error"] in {"linked_player_not_in_demo", "team_players_not_in_demo"}:
             raise DemoRejected(result["error"])
         if result["error"] != "unsupported_or_invalid_demo":
             raise ValueError("Invalid parser error")
         return None, None
+    if getattr(upload, "mode", "individual") == "team":
+        return validate_team_result(upload, result), None
     report = AnalysisReport.model_validate_json(json.dumps(result["report"]))
     if report.player_steam_id != upload.player_steam_id:
         raise ValueError("Parser returned a different player")
+    return report.model_dump(mode="json"), report_scripts(report)
+
+
+def report_scripts(report):
     # Derive commands from the validated report, never trust commands from a child payload.
     scripts = []
     if report.scenario_document:
         for scenario in report.scenario_document.scenarios:
+            if (
+                scenario.player.steam_id != report.player_steam_id
+                or scenario.source.demo_sha256 != report.demo_sha256
+                or scenario.map != report.map
+            ):
+                raise ValueError("Scenario does not belong to its player report")
             try:
                 scripts.append(
                     {
@@ -86,7 +102,60 @@ def run_parser(upload, directory, *, lock_fd=None):
                         "error": "scenario_not_exportable",
                     }
                 )
-    return report.model_dump(mode="json"), scripts
+    return scripts
+
+
+def validate_team_result(upload, payload):
+    from cs_map_trainer.team_analysis import TeamAnalysis
+
+    result = TeamAnalysis.model_validate_json(json.dumps(payload))
+    expected = list(upload.player_results.values_list("steam_id", flat=True))
+    if [player.steam_id for player in result.players] != expected:
+        raise ValueError("Parser returned a different team roster")
+    reports = [player.report for player in result.players if player.report is not None]
+    if not reports:
+        raise ValueError("Parser returned no present players")
+    if len({(report.demo_sha256, report.map.model_dump_json()) for report in reports}) != 1:
+        raise ValueError("Team reports do not refer to the same demo")
+    for player in result.players:
+        if player.statistics is not None and player.statistics.steam_id != player.steam_id:
+            raise ValueError("Parser returned another player's statistics")
+        if player.report is not None:
+            if player.report.player_steam_id != player.steam_id:
+                raise ValueError("Parser returned a different player")
+            if player.report.scenario_document and any(
+                scenario.player.steam_id != player.steam_id
+                for scenario in player.report.scenario_document.scenarios
+            ):
+                raise ValueError("Parser returned another player's scenario")
+    return result.model_dump(mode="json")
+
+
+def persist_results(upload, report, scripts):
+    if report is None:
+        return
+    if upload.mode == "team":
+        report = validate_team_result(upload, report)
+        for player in report["players"]:
+            parsed = (
+                AnalysisReport.model_validate_json(json.dumps(player["report"]))
+                if player["report"] is not None
+                else None
+            )
+            updated = upload.player_results.filter(steam_id=player["steam_id"]).update(
+                status=player["status"],
+                report=player["report"],
+                statistics=player["statistics"],
+                scripts=report_scripts(parsed) if parsed else None,
+            )
+            if updated != 1:
+                raise ValueError("Upload roster changed during processing")
+    else:
+        PlayerAnalysis.objects.update_or_create(
+            upload=upload,
+            steam_id=upload.player_steam_id,
+            defaults={"status": "ready", "report": report, "scripts": scripts},
+        )
 
 
 def run_bounded(command, env, *, lock_fd=None):
@@ -177,7 +246,7 @@ def _process_upload(upload_id, lock_fd):
                 state, error, charged = Upload.State.READY, "", True
         except DemoRejected as rejection:
             state, error, charged = Upload.State.UNSUPPORTED, str(rejection), True
-            logger.warning("Selected player absent from upload %s", upload.pk)
+            logger.warning("Selected players absent from upload %s", upload.pk)
         except InvalidUpload:
             state, error, charged = Upload.State.UNSUPPORTED, "invalid_demo_object", True
             logger.warning("Invalid stored demo for upload %s", upload.pk)
@@ -186,14 +255,32 @@ def _process_upload(upload_id, lock_fd):
             logger.error("Processing failed for upload %s (%s)", upload.pk, type(failure).__name__)
         finally:
             try:
-                Upload.objects.filter(
-                    pk=upload.pk, state=Upload.State.RUNNING, owner__isnull=False
-                ).update(
-                    state=state,
-                    error_code=error,
-                    quota_charged=charged,
-                    report=report,
-                    scripts=scripts,
+                with transaction.atomic():
+                    saved = (
+                        Upload.objects.select_for_update()
+                        .filter(pk=upload.pk, state=Upload.State.RUNNING, owner__isnull=False)
+                        .first()
+                    )
+                    if saved:
+                        persist_results(saved, report, scripts)
+                        saved.state = state
+                        saved.error_code = error
+                        saved.quota_charged = charged
+                        saved.finished_at = timezone.now()
+                        saved.save(
+                            update_fields=[
+                                "state",
+                                "error_code",
+                                "quota_charged",
+                                "finished_at",
+                            ]
+                        )
+            except Exception:
+                logger.exception("Could not persist analysis results for upload %s", upload.pk)
+                Upload.objects.filter(pk=upload.pk, state=Upload.State.RUNNING).update(
+                    state=Upload.State.FAILED,
+                    error_code="processing_failed",
+                    quota_charged=False,
                     finished_at=timezone.now(),
                 )
             finally:

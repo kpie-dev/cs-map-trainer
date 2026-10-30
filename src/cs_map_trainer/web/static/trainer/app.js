@@ -67,6 +67,12 @@
     submit.disabled = false;
     const rights = document.getElementById("upload-rights");
     const steamId = document.getElementById("player-steam-id");
+    const mode = document.getElementById("analysis-mode");
+    function updateMode() {
+      steamId.required = mode.value !== "team";
+      steamId.hidden = mode.value === "team";
+      mode.disabled = Boolean(reservation);
+    }
     steamId.addEventListener("change", () => { steamId.value = steamId.value.trim(); });
     const storageKey = `cmt-upload-reservation-account-${uploadForm.dataset.accountId}`;
     let file = null;
@@ -76,24 +82,32 @@
     try {
       const saved = JSON.parse(sessionStorage.getItem(storageKey) || "null");
       if (saved && typeof saved.request_id === "string" && typeof saved.signature === "string"
-        && typeof saved.player_steam_id === "string" && /^[0-9]{17}$/.test(saved.player_steam_id)) {
+        && (saved.mode === "team"
+          || (typeof saved.player_steam_id === "string" && /^[0-9]{17}$/.test(saved.player_steam_id)))) {
         if (Date.parse(saved.expires_at) <= Date.now()) {
           sessionStorage.removeItem(storageKey);
           feedback.textContent = "Your saved upload reservation has expired. You can choose a new file and SteamID.";
         } else {
           reservation = saved;
-          steamId.value = saved.player_steam_id;
+          if (saved.mode === "team" && !mode.querySelector('[value="team"]')) {
+            mode.add(new Option("Saved team upload reservation", "team"));
+          }
+          mode.value = saved.mode || "individual";
+          steamId.value = saved.player_steam_id || "";
           steamId.readOnly = true;
-          feedback.textContent = "You have an unfinished upload. Choose the same file to continue with its original SteamID.";
+          feedback.textContent = "You have an unfinished upload. Choose the same file to continue with its original player or team roster.";
         }
       }
     } catch (error) {
       persistenceAvailable = false;
       feedback.textContent = "Session storage is unavailable. Keep this page open during the upload.";
     }
+    updateMode();
+    mode.addEventListener("change", updateMode);
     function remember(value) {
       reservation = value;
       steamId.readOnly = Boolean(value);
+      updateMode();
       if (persistenceAvailable) {
         try {
           if (value) sessionStorage.setItem(storageKey, JSON.stringify(value));
@@ -162,13 +176,15 @@
         return;
       }
       const playerSteamId = steamId.value.trim();
-      if (!/^[0-9]{17}$/.test(playerSteamId)) {
+      const analysisMode = mode.value;
+      if (analysisMode === "individual" && !/^[0-9]{17}$/.test(playerSteamId)) {
         feedback.textContent = message("invalid_player_steam_id");
         steamId.focus();
         return;
       }
       steamId.value = playerSteamId;
-      if (reservation && reservation.player_steam_id !== playerSteamId) {
+      if (reservation && ((reservation.mode || "individual") !== analysisMode
+        || (analysisMode === "individual" && reservation.player_steam_id !== playerSteamId))) {
         feedback.textContent = message("idempotency_conflict");
         return;
       }
@@ -180,7 +196,9 @@
       if (newReservation) {
         remember({
           request_id: crypto.randomUUID(), signature: signature(file),
-          player_steam_id: playerSteamId, transferred: false,
+          mode: analysisMode,
+          ...(analysisMode === "individual" ? { player_steam_id: playerSteamId } : {}),
+          transferred: false,
           expires_at: new Date(Date.now() + 24 * 60 * 60 * 1000).toISOString(),
         });
       }
@@ -200,7 +218,8 @@
           request_id: reservation.request_id,
           size_bytes: file.size,
           has_upload_rights: true,
-          player_steam_id: reservation.player_steam_id,
+          mode: reservation.mode || "individual",
+          ...(reservation.mode === "team" ? {} : { player_steam_id: reservation.player_steam_id }),
         });
         accepted = true;
         if (started.state === "uploading") {
@@ -208,7 +227,7 @@
             remember(null);
             throw new Error(message("upload_expired"));
           }
-          remember({ ...reservation, expires_at: started.expires_at });
+          remember({ ...reservation, expires_at: started.expires_at, players: started.players });
           if (!reservation.transferred) {
             progress.hidden = false;
             progress.value = 0;
@@ -226,7 +245,8 @@
       } catch (error) {
         if ((newReservation && !accepted && error.code === "storage_not_configured")
           || ["monthly_demo_limit", "active_upload_exists", "input_cleanup_pending",
-          "verified_email_required", "invalid_player_steam_id", "upload_expired"].includes(error.code)) {
+          "verified_email_required", "invalid_player_steam_id", "upload_expired",
+          "coach_required", "team_roster_required", "invalid_analysis_mode"].includes(error.code)) {
           remember(null);
         }
         feedback.textContent = error.message;

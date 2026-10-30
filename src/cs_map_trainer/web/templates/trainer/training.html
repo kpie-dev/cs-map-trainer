@@ -1,14 +1,15 @@
 {% extends "trainer/base.html" %}
 {% load trainer_labels %}
 {% block content %}
-<a class="back-link" href="{% url 'report' upload.pk %}">← Back to report and selection</a>
+<a class="back-link" href="{{ report_url }}">← Back to report and selection</a>
+{% if player_result %}<p class="telemetry">PLAYER {{ player_result.name|default:player_result.steam_id }} / {{ player_result.steam_id }}</p>{% endif %}
 <section class="panel command-panel">
 <div class="section-top"><span class="eyebrow cyan">{{ map_label|upper }} / SANDBOX</span><span class="badge warning">NOT VERIFIED IN GAME</span></div>
 <h1>Group {{ position }} / {{ training_groups|length }}</h1>
 <p class="member-position">Scenario {{ member_position }} / {{ current_group.selected_count }} · Round {{ current.source.round_number }}</p>
 {% include "trainer/matchup.html" with item=current_member %}
 {% if exported %}
-<div class="actions command-actions"><button type="button" id="copy-command" class="primary">Copy CS2 commands</button><a class="button" href="/backend/uploads/{{ upload.pk }}/scenarios/{{ current.scenario_id }}/export/?format=cfg">Download scenario CFG</a><a class="button" href="/backend/uploads/{{ upload.pk }}/pack/?include_cfg=true">Download training ZIP</a></div>
+<div class="actions command-actions"><button type="button" id="copy-command" class="primary">Copy CS2 commands</button><a class="button" href="{{ backend_url }}scenarios/{{ current.scenario_id }}/export/?format=cfg">Download scenario CFG</a><a class="button" href="{{ backend_url }}pack/?include_cfg=true">Download training ZIP</a></div>
 <p id="copy-feedback" role="status">Copy one complete line, not several scenarios at once.</p>
 <noscript><p>Open “Command text / manual copy” below to select and copy the full line.</p></noscript>
 {% else %}<p class="notice danger" role="alert">{{ export_error }}</p>{% endif %}

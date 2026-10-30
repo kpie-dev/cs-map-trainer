@@ -18,6 +18,7 @@
 </section>
 <section class="module">
   <h2>Stripe - local snapshot, not a payment ledger</h2>
+  <p>Plan: {{ billing.plan|default:"None" }}. Scheduled plan: {{ billing.scheduled_plan|default:"None" }} from {{ billing.scheduled_at|default:"None" }}.</p>
   <p>Status: {{ billing.status|default:"None" }}. Paid through: {{ billing.paid_until|default:"None" }}. Last synchronized: {{ billing.synced_at|default:"Never" }}.</p>
   <p>Customer: {{ billing.customer_id|default:"None" }}. Subscription: {{ billing.subscription_id|default:"None" }}. Cancel at period end: {{ billing.cancel_at_period_end|yesno:"Yes,No" }}.</p>
   <p><strong>Blocking an account does not cancel its subscription. Charges may continue. Handle financial operations separately in Stripe.</strong></p>
@@ -30,7 +31,7 @@
 <section class="module">
   <h2>Upload history</h2>
   <table><thead><tr><th>ID</th><th>SteamID64</th><th>Created</th><th>State</th><th>Error</th></tr></thead><tbody>
-  {% for upload in uploads_page %}<tr><td>{{ upload.pk }}</td><td>{{ upload.player_steam_id }}</td><td>{{ upload.created_at }}</td><td>{{ upload.state }}</td><td>{{ upload.error_code }}</td></tr>{% empty %}<tr><td colspan="5">No uploads.</td></tr>{% endfor %}
+  {% for upload in uploads_page %}<tr><td>{{ upload.pk }} / {{ upload.mode }}</td><td>{% for player in upload.player_results.all %}{{ player.steam_id }}{% if not forloop.last %}, {% endif %}{% empty %}{{ upload.player_steam_id }}{% endfor %}</td><td>{{ upload.created_at }}</td><td>{{ upload.state }}</td><td>{{ upload.error_code }}</td></tr>{% empty %}<tr><td colspan="5">No uploads.</td></tr>{% endfor %}
   </tbody></table>
   {% if uploads_page.has_previous %}<a href="?uploads_page={{ uploads_page.previous_page_number }}">Previous uploads</a>{% endif %}
   {% if uploads_page.has_next %}<a href="?uploads_page={{ uploads_page.next_page_number }}">More uploads</a>{% endif %}

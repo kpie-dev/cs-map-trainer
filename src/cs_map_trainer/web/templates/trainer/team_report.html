@@ -1,0 +1,16 @@
+{% extends "trainer/base.html" %}
+{% block content %}
+<a href="{% url 'history' %}">My analyses</a>
+<div class="page-heading"><span class="eyebrow">TEAM ANALYSIS</span><h1>Your team report</h1><p>The roster below was saved with this upload. Later roster edits do not change it.</p></div>
+{% if active %}
+<section class="panel" id="job-status" data-status-url="/backend/uploads/{{ upload.pk }}/status/" data-state="{{ upload.state }}"><h2 id="job-state">{{ state_label }}</h2><p id="job-feedback" role="status">Waiting for the shared team analysis.</p><button type="button" id="refresh-status" hidden>Retry status updates</button><noscript>Reload to check the status.</noscript></section>
+{% elif failure %}<p class="notice danger" role="alert">{{ failure }}</p>
+{% else %}
+<section class="panel"><h2>Players</h2><div class="table-scroll"><table>
+<thead><tr><th>Player</th><th>Status</th><th>Match statistics and practice</th></tr></thead>
+<tbody>{% for player in players %}<tr><td><strong>{{ player.name|default:player.steam_id }}</strong><br><span class="telemetry">{{ player.steam_id }}</span></td><td>{{ player.get_status_display }}</td><td>{% if player.status == 'ready' %}{% include "trainer/player_statistics.html" with statistics=player.statistics %}<a class="button" href="{% url 'player_report' upload.pk player.steam_id %}">Duels and actions to improve</a>{% else %}Not present in this demo. No statistics or training were generated.{% endif %}</td></tr>{% endfor %}</tbody>
+</table></div></section>
+{% endif %}
+{% if upload.cleanup_pending %}<p class="notice warning">Raw demo cleanup has not yet been confirmed.</p>{% endif %}
+{% if not active %}<section class="panel danger"><form method="post" action="{% url 'remove_upload' upload.pk %}">{% csrf_token %}<label class="check"><input type="checkbox" name="confirm" value="yes" required> Permanently delete this analysis and all players' selections and historical ratings.</label><button class="destructive" type="submit">Delete team report</button></form></section>{% endif %}
+{% endblock %}

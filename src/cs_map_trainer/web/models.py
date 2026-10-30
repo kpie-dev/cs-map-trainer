@@ -13,6 +13,25 @@ class AccountPreferences(models.Model):
     )
 
 
+class Team(models.Model):
+    owner = models.OneToOneField(settings.AUTH_USER_MODEL, on_delete=models.CASCADE)
+
+
+class TeamMember(models.Model):
+    team = models.ForeignKey(Team, on_delete=models.CASCADE, related_name="members")
+    steam_id = models.CharField(max_length=17, validators=[RegexValidator(r"^[0-9]{17}$")])
+    name = models.CharField(max_length=64, blank=True)
+    position = models.PositiveSmallIntegerField()
+
+    class Meta:
+        ordering = ["position", "pk"]
+        constraints = [
+            models.UniqueConstraint(fields=["team", "steam_id"], name="unique_team_player"),
+            models.UniqueConstraint(fields=["team", "position"], name="unique_team_position"),
+            models.CheckConstraint(condition=Q(position__lt=5), name="team_position_limit"),
+        ]
+
+
 class AccountPolicy(models.Model):
     owner = models.OneToOneField(
         settings.AUTH_USER_MODEL, on_delete=models.CASCADE, related_name="account_policy"
@@ -75,6 +94,14 @@ class Upload(models.Model):
 
     id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
     owner = models.ForeignKey(settings.AUTH_USER_MODEL, null=True, on_delete=models.SET_NULL)
+    mode = models.CharField(
+        max_length=16,
+        default="individual",
+        choices=[
+            ("individual", "Individual"),
+            ("team", "Team"),
+        ],
+    )
     player_steam_id = models.CharField(max_length=17, validators=[RegexValidator(r"^[0-9]{17}$")])
     request_id = models.UUIDField()
     size_bytes = models.PositiveBigIntegerField()
@@ -115,6 +142,34 @@ class Upload(models.Model):
         ]
 
 
+class PlayerAnalysis(models.Model):
+    upload = models.ForeignKey(Upload, on_delete=models.CASCADE, related_name="player_results")
+    steam_id = models.CharField(max_length=17, validators=[RegexValidator(r"^[0-9]{17}$")])
+    name = models.CharField(max_length=64, blank=True)
+    position = models.PositiveSmallIntegerField(default=0)
+    status = models.CharField(
+        max_length=16,
+        default="pending",
+        choices=[
+            ("pending", "Pending"),
+            ("ready", "Ready"),
+            ("missing", "Not in demo"),
+        ],
+    )
+    statistics = models.JSONField(null=True)
+    report = models.JSONField(null=True)
+    scripts = models.JSONField(null=True)
+    selection = models.JSONField(null=True)
+
+    class Meta:
+        ordering = ["position", "pk"]
+        constraints = [
+            models.UniqueConstraint(fields=["upload", "steam_id"], name="unique_upload_player"),
+            models.UniqueConstraint(fields=["upload", "position"], name="unique_upload_position"),
+            models.CheckConstraint(condition=Q(position__lt=5), name="result_position_limit"),
+        ]
+
+
 class PracticeReview(models.Model):
     class Rating(models.TextChoices):
         DONE = "done", "Done"
@@ -123,6 +178,9 @@ class PracticeReview(models.Model):
         IRRELEVANT = "irrelevant", "Not useful"
 
     upload = models.ForeignKey(Upload, on_delete=models.CASCADE, related_name="practice_reviews")
+    player_result = models.ForeignKey(
+        PlayerAnalysis, null=True, on_delete=models.CASCADE, related_name="practice_reviews"
+    )
     scenario_id = models.CharField(max_length=128)
     rating = models.CharField(max_length=16, choices=Rating)
     reviewed_at = models.DateTimeField()
@@ -131,7 +189,12 @@ class PracticeReview(models.Model):
     class Meta:
         constraints = [
             models.UniqueConstraint(
-                fields=["upload", "scenario_id"], name="unique_scenario_review"
+                fields=["player_result", "scenario_id"], name="unique_player_scenario_review"
+            ),
+            models.UniqueConstraint(
+                fields=["upload", "scenario_id"],
+                condition=Q(player_result__isnull=True),
+                name="unique_legacy_scenario_review",
             ),
             models.CheckConstraint(
                 condition=(
@@ -154,6 +217,11 @@ class BillingAccount(models.Model):
     customer_id = models.CharField(max_length=128, unique=True, null=True)
     checkout_id = models.CharField(max_length=128, blank=True)
     checkout_generation = models.PositiveIntegerField(default=0)
+    checkout_plan = models.CharField(max_length=16, blank=True)
+    plan = models.CharField(max_length=16, default="pro")
+    scheduled_plan = models.CharField(max_length=16, blank=True)
+    scheduled_at = models.DateTimeField(null=True)
+    schedule_id = models.CharField(max_length=128, blank=True)
     subscription_id = models.CharField(max_length=128, blank=True)
     status = models.CharField(max_length=32, blank=True)
     paid_until = models.DateTimeField(null=True)

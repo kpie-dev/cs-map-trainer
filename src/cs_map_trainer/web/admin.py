@@ -16,7 +16,7 @@ from django.utils import timezone
 
 from .admin_access import SupportAdminSite, require_recent_admin_authentication
 from .entitlements import manual_access, monthly_limit
-from .models import AccountPreferences, BillingAccount, SupportAudit, Upload
+from .models import AccountPreferences, BillingAccount, PlayerAnalysis, SupportAudit, Upload
 from .services import IntakeError, month_start, quota_used
 from .support import ACTIONS, SupportActionForm, can_operate, execute_action
 
@@ -177,6 +177,7 @@ class AccountAdmin(admin.ModelAdmin):
         if len(term) == 17 and term.isascii() and term.isdigit():
             return queryset.filter(
                 Q(pk__in=Upload.objects.filter(player_steam_id=term).values("owner_id"))
+                | Q(pk__in=PlayerAnalysis.objects.filter(steam_id=term).values("upload__owner_id"))
                 | Q(
                     pk__in=AccountPreferences.objects.filter(last_player_steam_id=term).values(
                         "owner_id"
@@ -201,7 +202,7 @@ class AccountAdmin(admin.ModelAdmin):
     def access_source(self, obj):
         sources = []
         if obj.support_paid:
-            sources.append("Stripe")
+            sources.append("Stripe Coach" if obj.billing_account.plan == "coach" else "Stripe")
         if manual_access(obj):
             sources.append("Manual")
         return " + ".join(sources) or "Free"
@@ -235,14 +236,20 @@ class AccountAdmin(admin.ModelAdmin):
         policy = getattr(target, "account_policy", None)
         uploads = (
             Upload.objects.filter(owner=target)
+            .prefetch_related("player_results")
             .defer("report", "scripts", "selection", "key", "multipart_id")
             .order_by("-created_at", "-pk")
         )
         steam_ids = (
             Upload.objects.filter(owner=target)
-            .order_by("player_steam_id")
+            .order_by()
             .values_list("player_steam_id", flat=True)
-            .distinct()
+            .union(
+                PlayerAnalysis.objects.filter(upload__owner=target)
+                .order_by()
+                .values_list("steam_id", flat=True)
+            )
+            .order_by("player_steam_id")
         )
         preference = getattr(target, "accountpreferences", None)
         context = {

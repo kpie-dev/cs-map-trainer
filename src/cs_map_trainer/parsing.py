@@ -1,6 +1,7 @@
 """Adapter for the pinned Awpy API. No chat, voice or map assets are requested."""
 
 import hashlib
+import math
 from pathlib import Path
 
 import polars as pl
@@ -52,6 +53,11 @@ class DemoReader:
 
     def players(self) -> pl.DataFrame:
         return self.demo.players
+
+    @property
+    def tick_rate(self) -> float | None:
+        rate = self.demo.tick_rate
+        return rate if isinstance(rate, (int, float)) and math.isfinite(rate) and rate > 0 else None
 
     def combat(self) -> tuple[pl.DataFrame, pl.DataFrame, pl.DataFrame]:
         self.demo.load("rounds", "kills", "damages")

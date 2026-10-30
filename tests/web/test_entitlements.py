@@ -276,7 +276,7 @@ def test_manual_pro_ui_is_not_presented_as_paid_subscription(api, user):
     assert "not a paid Stripe subscription" in text
     assert "Paid access until" not in text
     assert "You are on the Free plan." not in text
-    assert "Subscribe to Pro / $7.99/month" in text
+    assert "Subscribe to Pro / $4.99/month" in text
 
 
 def test_both_pro_sources_are_shown_separately(api, user):
@@ -287,7 +287,7 @@ def test_both_pro_sources_are_shown_separately(api, user):
     assert response.context["stripe_paid_plan"]
     assert "Paid access until" in text
     assert "Manual Pro access until" in text
-    assert "Subscribe to Pro / $7.99/month" not in text
+    assert "Subscribe to Pro / $4.99/month" not in text
 
 
 def test_public_default_pricing_copy_is_preserved(client):

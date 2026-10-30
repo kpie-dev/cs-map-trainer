@@ -130,6 +130,37 @@ def test_player_migration_preserves_existing_accounts_uploads_and_billing(django
             assert paid.paid_until == billing.paid_until
             with pytest.raises(LookupError):
                 current.get_model("trainer", "SteamIdentity")
+            latest = [("trainer", "0012_migrate_player_results")]
+            executor = MigrationExecutor(isolated)
+            executor.migrate(latest)
+            migrated = executor.loader.project_state(latest).apps
+            Result = migrated.get_model("trainer", "PlayerAnalysis")
+            result = Result.objects.using(alias).get(upload_id=ready.pk)
+            assert result.steam_id == identity.pk
+            assert result.status == "ready"
+            assert result.report == report
+            assert result.selection == ready.selection
+            assert result.scripts == []
+            assert result.statistics is None
+            retained = migrated.get_model("trainer", "Upload").objects.using(alias).get(pk=ready.pk)
+            assert retained.report is None
+            assert retained.selection is None
+            assert retained.owner_id == owner.pk
+            retained_review = (
+                migrated.get_model("trainer", "PracticeReview")
+                .objects.using(alias)
+                .get(pk=review.pk)
+            )
+            assert retained_review.player_result_id == result.pk
+            assert retained_review.due_at == review.due_at
+            assert Result.objects.using(alias).get(upload_id=active.pk).status == "pending"
+            executor = MigrationExecutor(isolated)
+            executor.migrate(after)
+            restored = executor.loader.project_state(after).apps
+            assert (
+                restored.get_model("trainer", "Upload").objects.using(alias).get(pk=ready.pk).report
+                == report
+            )
     finally:
         isolated.close()
         del connections[alias]

@@ -6,17 +6,18 @@
 <section class="panel"><h2>02 / Demo analysis</h2>
 <p>No Steam sign-in or account linking required. Enter a SteamID64 when uploading each demo.</p>
 {% if last_player_steam_id %}<p>Last used SteamID64: <span class="telemetry cyan">{{ last_player_steam_id }}</span></p><p class="muted">An unverified, editable suggestion for your next upload, not a linked profile.</p>{% endif %}
-<p>{% if paid_plan %}<strong class="green">Pro: unlimited analyses on your account.</strong>{% else %}Free analyses used this UTC calendar month: <strong>{{ quota_used }}/{{ quota_limit }}</strong>. Resets on the first day of each month at 00:00 UTC.{% endif %}</p>
+<p>{% if coach_plan %}<strong class="green">Coach: unlimited analyses and one team of up to 5 players.</strong>{% elif paid_plan %}<strong class="green">Pro: unlimited analyses on your account.</strong>{% else %}Free analyses used this UTC calendar month: <strong>{{ quota_used }}/{{ quota_limit }}</strong>. Resets on the first day of each month at 00:00 UTC.{% endif %}</p>
 </section>
 </div>
 <section class="panel" id="billing">
   <span class="eyebrow">SUBSCRIPTION / STRIPE BILLING</span>
-  <h2>Pro / $7.99/month</h2>
+  <h2>Pro / $4.99/month · Coach / $19.99/month</h2>
+  <p>Coach includes Pro and a saved team of 1–5 players. Each demo provides separate match statistics, duel reports and practice selections for each player.</p>
   <p>Unlimited analyses on <strong>your account</strong>.
     Your free allowance is {{ quota_limit }} analyses per UTC calendar month.
-    Both plans have a 1 GiB file limit, one active upload or analysis per account, and one analysis running at a time across the service. Changing SteamID does not reset your limit.</p>
+    All plans have a 1 GiB file limit, one active upload or analysis per account, and one analysis running at a time across the service. Changing SteamID does not reset your limit.</p>
   {% if stripe_paid_plan %}
-    <p class="notice success">Pro is active. Paid access until {{ billing.paid_until|date:"j M Y, H:i" }} UTC.</p>
+    <p class="notice success">{% if coach_plan %}Coach{% else %}Pro{% endif %} is active. Paid access until {{ billing.paid_until|date:"j M Y, H:i" }} UTC.</p>
   {% elif not manual_pro %}
     <p>You are on the Free plan.</p>
   {% endif %}
@@ -24,13 +25,19 @@
     <p class="notice success">Manual Pro access until {{ manual_pro_until|date:"j M Y, H:i" }} UTC. This grant is not a paid Stripe subscription.</p>
   {% endif %}
   {% if billing %}
+    {% if billing.scheduled_plan %}<p class="notice">Scheduled plan: {{ billing.scheduled_plan }} from {{ billing.scheduled_at|date:"j M Y, H:i" }} UTC. No prorated charge.</p>{% endif %}
     {% if billing.status %}<p class="telemetry">STRIPE STATUS: {{ billing.status }}</p>{% endif %}
     {% if billing.cancel_at_period_end %}<p class="warning">Your subscription will end after the current paid period.</p>{% endif %}
     {% if billing.synced_at %}<p class="muted">Status last confirmed: {{ billing.synced_at|date:"j M Y, H:i" }} UTC.</p>{% endif %}
   {% endif %}
   {% if email_verified %}
     <div class="actions">
-      {% if not stripe_paid_plan %}<form action="{% url 'billing_checkout' %}" method="post">{% csrf_token %}<button class="primary" type="submit">Subscribe to Pro / $7.99/month</button></form>{% endif %}
+      {% if not stripe_paid_plan %}
+        <form action="{% url 'billing_checkout' %}" method="post">{% csrf_token %}<input type="hidden" name="plan" value="pro"><button class="primary" type="submit">Subscribe to Pro / $4.99/month</button></form>
+        <form action="{% url 'billing_checkout' %}" method="post">{% csrf_token %}<input type="hidden" name="plan" value="coach"><button type="submit">Subscribe to Coach / $19.99/month</button></form>
+      {% else %}
+        <form action="{% url 'billing_change' %}" method="post">{% csrf_token %}<label for="next-plan">Plan from next renewal</label><select id="next-plan" name="plan"><option value="pro">Pro / $4.99/month</option><option value="coach">Coach / $19.99/month</option></select><button type="submit">Schedule plan change</button></form>
+      {% endif %}
       {% if billing.customer_id %}
         <form action="{% url 'billing_portal' %}" method="post">{% csrf_token %}<button type="submit">Manage subscription in Stripe</button></form>
         <form action="{% url 'billing_refresh' %}" method="post">{% csrf_token %}<button type="submit">Refresh payment status</button></form>
@@ -41,6 +48,14 @@
     Cancellation takes effect at the end of the paid period. A failed renewal does not extend access.
     When all Pro access ends, your free allowance applies again with existing monthly usage retained. Analyses already started are not interrupted.</p>
 </section>
-<section class="panel"><h2>Your data</h2><p>Your raw demo is deleted after the first analysis attempt. Reports, selections and any historical self-reported practice ratings stay until you delete them. Ratings are no longer used by the practice library. We do not use them to train models.</p><p>We store the SteamID for each analysis and your last used ID as a suggestion on your account. Neither verifies profile ownership. Reports are private to the account that uploaded the demo, even if another account enters the same SteamID.</p><p>Deleting your account removes the suggestion and results. Minimal upload records, including the selected SteamID, remain through the current UTC month and until input cleanup succeeds. There is no SteamID lock or cross-account quota. A minimal Stripe customer reference remains to handle delayed events and payment cancellation. The payment provider retains billing records.</p></section>
+<section class="panel" id="team"><h2>Your team / up to 5 players</h2>
+<p>One roster per account. SteamIDs do not verify profile ownership. Every upload preserves its original roster and names.</p>
+{% if coach_plan and email_verified %}
+<form action="{% url 'team_save' %}" method="post">{% csrf_token %}
+{% for member in roster_slots %}<fieldset><legend>Player {{ forloop.counter }}</legend><label for="team-id-{{ forloop.counter }}">SteamID64</label><input id="team-id-{{ forloop.counter }}" name="steam_id" value="{{ member.steam_id|default:'' }}" inputmode="numeric" pattern="[0-9]{17}" autocomplete="off"><label for="team-name-{{ forloop.counter }}">Name (optional)</label><input id="team-name-{{ forloop.counter }}" name="name" maxlength="64" value="{{ member.name|default:'' }}"></fieldset>{% endfor %}
+<button type="submit">Save team</button></form>
+{% else %}<p>An active Coach subscription is required to edit this roster or start new team analyses. Previous reports and training remain accessible after expiry.</p>{% for member in team_members %}<p>{{ member.name|default:member.steam_id }} / {{ member.steam_id }}</p>{% endfor %}{% endif %}
+</section>
+<section class="panel"><h2>Your data</h2><p>Your raw demo is deleted after the first analysis attempt. Reports, selections and any historical self-reported practice ratings stay until you delete them. Ratings are no longer used by the practice library. We do not use them to train models.</p><p>We store the SteamID for each analysis and your last used ID as a suggestion on your account. Team analyses also store an immutable roster of SteamIDs and optional names. Neither verifies profile ownership. Reports are private to the account that uploaded the demo, even if another account enters the same SteamID.</p><p>Deleting your account removes the suggestion, saved roster and player results. Minimal upload records, including the selected SteamID, remain through the current UTC month and until input cleanup succeeds. There is no SteamID lock or cross-account quota. A minimal Stripe customer reference remains to handle delayed events and payment cancellation. The payment provider retains billing records.</p></section>
 {% if email_verified %}<section class="panel danger"><h2>Delete your account and results</h2><p>This cannot be undone. Wait for any active analysis to finish first. Before deleting your account, we immediately cancel your subscription and open checkout sessions, with no automatic refund. If Stripe does not confirm cancellation, your account will not be deleted.</p><form method="post" action="{% url 'remove_account' %}">{% csrf_token %}<label for="delete-password">Confirm your password</label><input id="delete-password" name="password" type="password" autocomplete="current-password" required><label class="check"><input name="confirm" value="yes" type="checkbox" required> I understand that my reports and ratings will be deleted and my subscription canceled, with no automatic refund.</label><button class="destructive" type="submit">Delete my account</button></form></section>{% endif %}
 {% endblock %}

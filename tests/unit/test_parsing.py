@@ -133,3 +133,12 @@ def test_absent_native_values_remain_absent_instead_of_guessing(tmp_path, monkey
     )
     reader, _ = reader_with_native_data(tmp_path, monkeypatch, frame)
     assert reader.locations([99])["last_place_name"].to_list() == [name]
+
+
+@pytest.mark.parametrize(
+    "rate,expected", [(64.0, 64.0), (128, 128), (None, None), (0, None), (float("inf"), None)]
+)
+def test_native_tick_rate_is_verified_not_assumed(tmp_path, monkeypatch, rate, expected):
+    reader, native = reader_with_native_data(tmp_path, monkeypatch, pl.DataFrame())
+    native.tick_rate = rate
+    assert reader.tick_rate == expected

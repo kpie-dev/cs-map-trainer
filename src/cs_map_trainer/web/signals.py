@@ -2,7 +2,7 @@ from django.contrib.auth import get_user_model
 from django.db.models.signals import pre_delete
 from django.dispatch import receiver
 
-from .models import PracticeReview, Upload
+from .models import PlayerAnalysis, PracticeReview, Upload
 
 
 @receiver(pre_delete, sender=get_user_model())
@@ -19,3 +19,4 @@ def erase_user_results(sender, instance, **kwargs):
         cleanup_pending=True,
     )
     PracticeReview.objects.filter(upload__owner=instance).delete()
+    PlayerAnalysis.objects.filter(upload__owner=instance).delete()

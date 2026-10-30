@@ -27,10 +27,16 @@ def main():
 
     from cs_map_trainer.analysis import analyze, roster
     from cs_map_trainer.parsing import DemoError, DemoReader
+    from cs_map_trainer.team_analysis import TeamAnalysisRequest, analyze_team
 
     try:
+        team_ids = None
+        if steam_id.lstrip().startswith("["):
+            team_ids = TeamAnalysisRequest(steam_ids=json.loads(steam_id)).steam_ids
         reader = DemoReader(path)
-        if steam_id not in {player.steam_id for player in roster(reader).players}:
+        if team_ids is not None:
+            result = analyze_team(reader, team_ids).model_dump(mode="json")
+        elif steam_id not in {player.steam_id for player in roster(reader).players}:
             result = {"error": "linked_player_not_in_demo"}
         else:
             report = analyze(lambda: reader, steam_id)
@@ -38,7 +44,7 @@ def main():
                 "report": report.model_dump(mode="json"),
                 "error": None,
             }
-    except (DemoError, ValidationError):
+    except (DemoError, ValidationError, json.JSONDecodeError):
         result = {"error": "unsupported_or_invalid_demo"}
     with output.open("x") as handle:
         json.dump(result, handle)

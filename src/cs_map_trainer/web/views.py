@@ -20,6 +20,7 @@ from .presentation import error_message
 from .services import (
     STORAGE_ERRORS,
     IntakeError,
+    attach_player,
     complete,
     delete_account,
     delete_history,
@@ -82,6 +83,7 @@ def serialize(upload, *, include_result=False):
     result = {
         "id": str(upload.pk),
         "player_steam_id": upload.player_steam_id,
+        "mode": upload.mode,
         "state": upload.state,
         "created_at": upload.created_at.isoformat(),
         "expires_at": upload.expires_at.isoformat(),
@@ -90,7 +92,28 @@ def serialize(upload, *, include_result=False):
         "cleanup_error": upload.cleanup_error or None,
         "compatibility": "unverified_in_game",
     }
+    if upload.mode == "team":
+        result["players"] = [
+            {
+                "steam_id": player.steam_id,
+                "name": player.name,
+                "status": player.status,
+                **(
+                    {
+                        "statistics": player.statistics,
+                        "report": player.report,
+                        "scripts": player.scripts,
+                        "selection": player.selection,
+                    }
+                    if include_result
+                    else {}
+                ),
+            }
+            for player in upload.player_results.all()
+        ]
     if include_result:
+        if upload.mode == "individual":
+            attach_player(upload)
         result.update(report=upload.report, scripts=upload.scripts, selection=upload.selection)
     return result
 
@@ -126,9 +149,23 @@ def upload_start(request):
         request_id = uuid.UUID(data["request_id"])
     except (KeyError, ValueError, TypeError, AttributeError) as error:
         raise IntakeError("invalid_request_id", 400) from error
-    player_steam_id = validate_player_steam_id(data.get("player_steam_id"))
+    mode = data.get("mode", "individual")
+    player_steam_id = data.get("player_steam_id")
+    if mode == "individual":
+        player_steam_id = validate_player_steam_id(player_steam_id)
+    elif mode != "team":
+        raise IntakeError("invalid_analysis_mode", 400)
     storage = R2()
-    upload = initiate(request.user, request_id, data.get("size_bytes"), player_steam_id, storage)
+    if data.get("mode") == "team" and "players" in data:
+        raise IntakeError("invalid_team_roster", 400)
+    upload = initiate(
+        request.user,
+        request_id,
+        data.get("size_bytes"),
+        player_steam_id,
+        storage,
+        mode=mode,
+    )
     response = serialize(upload)
     if upload.state == Upload.State.UPLOADING and upload.expires_at > timezone.now():
         response.update(
@@ -171,17 +208,17 @@ def upload_status(request, upload_id):
 
 @require_http_methods(["GET", "POST"])
 @private
-def upload_selection(request, upload_id):
+def upload_selection(request, upload_id, steam_id=None):
     if request.method == "POST":
-        result = save_training_selection(request.user, upload_id, body(request))
+        result = save_training_selection(request.user, upload_id, body(request), steam_id=steam_id)
     else:
-        result = get_training_selection(request.user, upload_id)
+        result = get_training_selection(request.user, upload_id, steam_id=steam_id)
     return JsonResponse(result)
 
 
 @require_GET
 @private
-def upload_pack(request, upload_id):
+def upload_pack(request, upload_id, steam_id=None):
     if set(request.GET) - {"include_cfg"} or request.GET.getlist("include_cfg") not in (
         [],
         ["true"],
@@ -189,7 +226,10 @@ def upload_pack(request, upload_id):
     ):
         raise IntakeError("invalid_export_parameters", 400)
     pack = training_pack(
-        request.user, upload_id, include_cfg=request.GET.get("include_cfg") == "true"
+        request.user,
+        upload_id,
+        include_cfg=request.GET.get("include_cfg") == "true",
+        steam_id=steam_id,
     )
     response = HttpResponse(pack.archive, content_type="application/zip")
     response["Content-Disposition"] = f'attachment; filename="training-{upload_id}.zip"'
@@ -198,14 +238,14 @@ def upload_pack(request, upload_id):
 
 @require_GET
 @private
-def upload_export(request, upload_id, scenario_id):
+def upload_export(request, upload_id, scenario_id, steam_id=None):
     if set(request.GET) - {"format"} or request.GET.getlist("format") not in (
         [],
         ["json"],
         ["cfg"],
     ):
         raise IntakeError("invalid_export_parameters", 400)
-    scenario, exported = training_export(request.user, upload_id, scenario_id)
+    scenario, exported = training_export(request.user, upload_id, scenario_id, steam_id=steam_id)
     if request.GET.get("format") == "cfg":
         response = HttpResponse(exported.cfg, content_type="text/plain; charset=utf-8")
         response["Content-Disposition"] = 'attachment; filename="scenario.cfg"'

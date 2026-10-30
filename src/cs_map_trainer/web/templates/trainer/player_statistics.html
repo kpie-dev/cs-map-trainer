@@ -1,0 +1,10 @@
+{% if statistics %}
+<dl>
+<dt>Rounds played</dt><dd>{{ statistics.rounds_played|default_if_none:"N/A" }}</dd>
+<dt>K / D / A</dt><dd>{{ statistics.kills|default_if_none:"N/A" }} / {{ statistics.deaths|default_if_none:"N/A" }} / {{ statistics.assists|default_if_none:"N/A" }}</dd>
+<dt>ADR</dt><dd>{{ statistics.adr|floatformat:1|default:"N/A" }}</dd>
+<dt>HS%</dt><dd>{{ statistics.hs_percent|floatformat:1|default:"N/A" }}</dd>
+<dt>Estimated Rating 2.0</dt><dd>{{ statistics.estimated_rating_2|floatformat:2|default:"N/A" }}</dd>
+</dl>
+<details><summary>Metric definitions and limitations</summary><p>Live rounds including overtime, excluding warmup and knife rounds. Participation is measured at freeze end; post-round events are excluded and survival is inferred from recorded deaths. ADR uses enemy HP damage per round played. HS% is headshot kills divided by enemy kills. Estimated Rating 2.0 is a community approximation, not an official HLTV rating or Rating 3.0. Missing inputs are not replaced with zeros. KAST uses a 5-second trade window; rating assists use 40 HP damage or a recorded flash assist.</p><p>Impact = 2.13 × KPR + 0.42 × APR − 0.41. Rating = 0.0073 × KAST% + 0.3591 × KPR − 0.5329 × DPR + 0.2372 × Impact + 0.0032 × ADR + 0.1587.</p><p class="telemetry">METRIC VERSION {{ statistics.metric_version }}</p>{% for reason in statistics.limitations %}<p>{{ reason }}</p>{% endfor %}{% if statistics.unavailable %}<ul>{% for metric, reason in statistics.unavailable.items %}<li>{{ metric }}: {{ reason }}</li>{% endfor %}</ul>{% endif %}</details>
+{% else %}<p class="muted">Match statistics were not recorded for this report.</p>{% endif %}

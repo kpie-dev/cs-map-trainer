@@ -1,5 +1,13 @@
 # Plan wykonawczy i todos do kontynuacji w nowej sesji
 
+## Aktualizacja: pakiet Trener i cennik
+
+Bieżący zakres i instrukcje wdrożenia opisuje README: Pro 4,99 USD/mies.,
+Trener 19,99 USD/mies., jeden zespół do 5 graczy, raporty i trening per zawodnik.
+Przed wdrożeniem należy przejść odbiór obu cen i harmonogramów w Stripe test mode
+oraz migracje wyników przy zatrzymanym intake i opróżnionej kolejce.
+Wpisy o 7,99 USD poniżej są historyczne i nie określają nowej konfiguracji.
+
 ## Aktualizacja: uproszczony przepływ i treningi grupowe
 
 **Zaimplementowane i odebrane lokalnie:** upload → aktualny etap → wybór grup →

@@ -23,7 +23,8 @@ stylistyki Tactical HUD z `design/`, bez zewnętrznych skryptów i fikcyjnych st
 Biblioteka treningów obejmuje grupy wszystkich wybranych podobnych sytuacji bez ocen i harmonogramu,
 bez telemetrii z gry; historyczne oceny pozostają zachowane.
 Jest też moduł Stripe Billing: **Free — 3 analizy na miesiąc kalendarzowy UTC;
-Pro — 7,99 USD/mies. bez limitu liczby analiz na koncie serwisu**.
+Pro — 4,99 USD/mies. bez limitu liczby analiz na koncie serwisu;
+Trener — 19,99 USD/mies. z funkcjami Pro i jednym zespołem do 5 zawodników**.
 Integracje z rzeczywistym R2, SMTP i Stripe wymagają
 konfiguracji i osobnej próby przed wdrożeniem; testy z atrapami nie są jej dowodem.
 
@@ -523,7 +524,7 @@ na dole strony. W przeglądarkach obsługujących `commandfor` przycisk działa 
 bez JavaScript. Free obejmuje **3 przyjęte dema na
 konto w miesiącu kalendarzowym UTC**, z rezerwacją przy rozpoczęciu uploadu i jednym
 aktywnym zadaniem. 1 GiB jest wyłącznie technicznym limitem pojedynczego pliku.
-Pro kosztuje **7,99 USD miesięcznie** i usuwa limit liczby analiz na koncie,
+Pro kosztuje **4,99 USD miesięcznie** i usuwa limit liczby analiz na koncie,
 ale nie limit rozmiaru, jedno aktywne zadanie ani globalną wyłączność parsera.
 Miesiąc Free resetuje się pierwszego dnia o 00:00 UTC. Wszystkie naliczone
 analizy miesiąca, również z czasu Pro, są uwzględniane po powrocie do Free.
@@ -951,8 +952,71 @@ z obowiązku posiadania praw do przesłania i analizy dema.
 
 ### Stripe Billing — abonament za serwis
 
-Zaimplementowano **7,99 USD/miesiąc, bez limitu liczby analiz na koncie
-serwisu**. Free obejmuje 3 analizy na konto na miesiąc kalendarzowy UTC.
+#### Trener: skład, wyniki i trening
+
+Aktywny pakiet Trener odblokowuje zapis jednego składu 1–5 unikalnych SteamID64
+na `/account/#team` (opcjonalne nazwy do 64 znaków). Identyfikatory nie potwierdzają
+własności profilu ani wspólnej drużyny w grze. Nie ma zaproszeń ani dostępu
+zawodników do konta trenera.
+
+Przy wysyłaniu dema wybierz `Saved team`. Backend pobiera skład z ustawień,
+zapisuje jego niezmienny snapshot i przetwarza wspólne demo dla wszystkich
+obecnych zawodników. Edycja składu nie zmienia wcześniejszych analiz ani retry
+istniejącej rezerwacji. Nieobecny zawodnik ma status `missing`, nie zerowe
+statystyki. Brak wszystkich zawodników odrzuca demo; jest to próba analizy
+nieprawidłowego wejścia, nie awaria infrastruktury.
+
+Raport zespołowy otwiera listę zawodników. Dalej hierarchia jest taka sama
+w raporcie i bibliotece: **zawodnik → grupy sytuacji → konkretne akcje**.
+Każdy gracz ma własny wybór, odrzucenia, eksport i domyślny limit do 10 scenariuszy.
+Brak kwalifikujących się pojedynków nie usuwa statystyk meczowych.
+W bibliotece wybór zawodnika poprzedza paginację jego treningów.
+
+Nowe API przyjmuje `POST /backend/uploads/` z `mode: "team"` i bez
+`player_steam_id`; pozostałe wymagane pola rezerwacji pozostają bez zmian.
+Nie przyjmuje składu od klienta. Odpowiedź zawiera `mode` i `players`
+ze snapshotu, a szczegóły gotowej analizy także ich raporty/statystyki.
+Operacje zawodnika mają prefiks
+`/backend/uploads/<upload_id>/players/<steam_id>/` i istniejące sufiksy
+`selection/`, `pack/`, `scenarios/<scenario_id>/export/`.
+Próba operacji treningowej na całym uploadzie zespołowym bez wskazania gracza
+zwraca `player_required`. Stare ścieżki i kształty danych indywidualnych analiz
+pozostają obsługiwane.
+
+Statystyki meczowe są oddzielone od konserwatywnych filtrów pojedynków:
+K/D/A, ADR i HS% dotyczą rund live (również dogrywek), bez rozgrzewki
+i rund nożowych. ADR to obrażenia HP zadane przeciwnikom na rundę udziału,
+bez overkill; HS% to odsetek zabójstw przeciwników headshotem.
+Wyniki obejmują wersję metryki i jawne przyczyny niedostępności, nie zgadywane zera.
+
+**Estimated Rating 2.0 jest przybliżeniem, nie oficjalnym ratingiem HLTV
+ani aktualnym Rating 3.0.** Używa publicznego wzoru regresyjnego:
+`Impact = 2.13*KPR + 0.42*APR - 0.41`;
+`Rating = 0.0073*KAST + 0.3591*KPR - 0.5329*DPR + 0.2372*Impact + 0.0032*ADR + 0.1587`,
+gdzie KAST jest procentem 0–100. KAST zalicza rundę najwyżej raz za
+kill/assist/survival/traded death; okno trade wynosi 5 sekund.
+Przybliżenie nie odtwarza ekonomii i Round Swing HLTV 3.0.
+Niekompletne wejście uniemożliwia obliczenie zależnej metryki.
+Nie należy utożsamiać wyniku ze scoreboardem konkretnej platformy.
+
+Po wygaśnięciu Trenera można nadal otwierać i eksportować wcześniejsze
+raporty oraz treningi zespołu. Zablokowane są nowe analizy zespołowe i edycja
+składu. Już przyjęte zadania kończą się normalnie. Ręczne nadanie Pro
+przez support nie nadaje uprawnień Trenera.
+
+Migracje przenoszą stare raporty, wybory i oceny do wyników zawodnika,
+bez ponownego parsowania usuniętych dem. Nowe statystyki nie są odtwarzane
+ze starych raportów. **Przed migracją zatrzymaj intake, opróżnij kolejkę
+i zatrzymaj stare workery**; po migracjach uruchom zgodne wersje web/workera.
+Cofnięcie migracji wyników jest blokowane, jeśli istnieją już uploady zespołowe:
+stary schemat nie umie ich reprezentować. Użyj sprawdzonego backupu, nie
+wymuszonego rollbacku usuwającego dane zawodników.
+Usunięcie raportu usuwa wyniki wszystkich jego zawodników; usunięcie konta
+usuwa również zapisany skład i snapshoty zawodników.
+
+Pakiet **Pro kosztuje 4,99 USD/miesiąc**, a **Trener 19,99 USD/miesiąc**
+i obejmuje Pro oraz jeden zespół 1–5 graczy. Oba płatne pakiety nie mają limitu
+liczby analiz na koncie serwisu. Free obejmuje 3 analizy na konto na miesiąc kalendarzowy UTC.
 Nie ma opłat za pojedyncze demo, okresu próbnego ani automatycznego zwrotu.
 Portal i checkout są hostowane przez Stripe; aplikacja nie przechowuje kart.
 
@@ -985,10 +1049,15 @@ odebranie dostępu wymaga jej anulowania. Aplikacja nie wykonuje refundacji.
 
 #### Konfiguracja Stripe
 
-1. W trybie testowym Stripe utwórz stałą cenę **799 centów USD**, cyklicznie
+1. W trybie testowym Stripe utwórz stałe ceny **499 centów USD (Pro)**
+   oraz **1999 centów USD (Trener)**, cyklicznie
    co miesiąc (interval `month`, interval count `1`, licensed). Bez triala
-   i kodów promocyjnych. Ustaw `STRIPE_PRICE_ID`; aplikacja weryfikuje parametry
+   i kodów promocyjnych. Ustaw `STRIPE_PRICE_ID` i `STRIPE_COACH_PRICE_ID`;
+   aplikacja weryfikuje parametry
    ceny zamiast przyjmować inną kwotę lub walutę.
+   Istniejącej ceny 799 centów nie można zmienić w Stripe: przypisz jej ID do
+   `STRIPE_LEGACY_PRO_PRICE_ID`, a nową cenę 499 centów do `STRIPE_PRICE_ID`.
+   Nie usuwaj obsługi starej ceny, dopóki dotyczą jej subskrypcje/opłacone okresy.
 2. Utwórz konfigurację Billing Portal: anulowanie włączone, tryb
    **at period end**; zmiany planu/ceny wyłączone. Włącz zarządzanie metodą
    płatności i historię faktur. Ustaw `STRIPE_PORTAL_CONFIGURATION_ID`.
@@ -1001,11 +1070,41 @@ odebranie dostępu wymaga jej anulowania. Aplikacja nie wykonuje refundacji.
    `checkout.session.async_payment_succeeded`, `checkout.session.async_payment_failed`,
    `customer.subscription.created`, `customer.subscription.updated`,
    `customer.subscription.deleted`, `invoice.paid`, `invoice.payment_failed`,
-   `invoice.voided`, `invoice.marked_uncollectible`.
+   `invoice.voided`, `invoice.marked_uncollectible` oraz grupę zdarzeń
+   `subscription_schedule.*` dla synchronizacji zaplanowanych zmian.
+   Nieobsługiwane typy zdarzeń są ignorowane.
 5. Zastosuj migracje i przejdź w trybie testowym zakup, webhook, odnowienie,
    nieudaną płatność, anulowanie, wygaśnięcie oraz usunięcie konta.
    Dopiero po odbiorze skonfiguruj odpowiednie klucze/cenę/portal/webhook w live.
    Nie mieszaj identyfikatorów między środowiskami i nie zapisuj sekretów w Git.
+
+Zmiana Pro ↔ Trener na koncie tworzy harmonogram od następnego odnowienia,
+bez proraty. Sam zapis harmonogramu nie nadaje Trenera: wymagany jest
+potwierdzony opłacony okres właściwego pakietu. Portal nadal służy do faktur,
+metod płatności i anulowania; nie włączaj w nim niezależnych zmian cen.
+Usunięcie konta anuluje również zaplanowane przejścia.
+
+Po skonfigurowaniu obu nowych cen oraz starej ceny Pro sprawdź migrację:
+
+```sh
+uv run cs-map-trainer-web migrate_pro_prices
+# Dopiero po przeglądzie dry-run, w odpowiednim środowisku Stripe:
+uv run cs-map-trainer-web migrate_pro_prices --apply
+```
+
+Komenda domyślnie niczego nie zmienia. Zastosowanie planuje obniżkę starych
+abonamentów Pro od odnowienia, bez nadpisywania istniejących przyszłych zmian
+planu lub anulowania. Ponowienie kończy konfigurację przerwanego harmonogramu
+aplikacji zamiast pomijać go tylko dlatego, że istnieje w Stripe. Przy braku
+metadanych własność musi zostać potwierdzona ponowieniem oryginalnego klucza
+idempotencji; bez tego aplikacja nie nadpisze harmonogramu.
+Ponowienie nie może tworzyć drugiego abonamentu.
+Po zakończeniu migracji wszystkich aktywnych starych abonamentów i wygaśnięciu
+ich opłaconych okresów można usunąć `STRIPE_LEGACY_PRO_PRICE_ID`.
+Historyczne subskrypcje `canceled` i `incomplete_expired` nie wymagają tej
+konfiguracji i nie nadają dostępu; nierozpoznana cena czynnej subskrypcji
+nadal blokuje uzgodnienie zamiast przyznawać uprawnienia.
+Przed użyciem live odebrać tę ścieżkę w Stripe test mode.
 
 Przy lokalnym odbiorze można przekazać webhooki przez Stripe CLI:
 `stripe listen --forward-to http://localhost:8000/billing/stripe/webhook/`.

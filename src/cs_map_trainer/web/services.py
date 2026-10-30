@@ -18,9 +18,9 @@ from cs_map_trainer.packs import build_pack, load_scenarios, select_scenarios
 from cs_map_trainer.scenarios import ContractModel, Identifier
 from cs_map_trainer.training_groups import expand_group_selection
 
-from .entitlements import monthly_limit, pro_access
+from .entitlements import coach_access, monthly_limit, pro_access
 from .identity import lock_account
-from .models import AccountPreferences, Upload
+from .models import AccountPreferences, PlayerAnalysis, Upload
 from .storage import R2, InvalidUpload
 
 logger = logging.getLogger(__name__)
@@ -73,10 +73,15 @@ def validate_player_steam_id(player_steam_id):
     return player_steam_id.strip()
 
 
-def initiate(user, request_id, size, player_steam_id, storage=None):
+def initiate(user, request_id, size, player_steam_id=None, storage=None, *, mode="individual"):
     if type(size) is not int or not 8 <= size <= 1024**3:
         raise IntakeError("invalid_demo_size", 400)
-    player_steam_id = validate_player_steam_id(player_steam_id)
+    if mode not in {"individual", "team"}:
+        raise IntakeError("invalid_analysis_mode", 400)
+    if mode == "individual":
+        player_steam_id = validate_player_steam_id(player_steam_id)
+    elif player_steam_id is not None:
+        raise IntakeError("invalid_team_roster", 400)
     storage = storage or R2()
     now = timezone.now()
     with transaction.atomic():
@@ -85,9 +90,24 @@ def initiate(user, request_id, size, player_steam_id, storage=None):
             raise IntakeError("account_blocked", 403)
         existing = Upload.objects.filter(owner=user, request_id=request_id).first()
         if existing:
-            if existing.size_bytes != size or existing.player_steam_id != player_steam_id:
+            if (
+                existing.size_bytes != size
+                or existing.mode != mode
+                or (mode == "individual" and existing.player_steam_id != player_steam_id)
+            ):
                 raise IntakeError("idempotency_conflict")
             return existing
+        if mode == "team":
+            from .teams import roster_members
+
+            if not coach_access(user):
+                raise IntakeError("coach_required", 403)
+            members = list(roster_members(user))
+            if not 1 <= len(members) <= 5:
+                raise IntakeError("team_roster_required", 400)
+            players = [(member.steam_id, member.name) for member in members]
+        else:
+            players = [(player_steam_id, "")]
         if Upload.objects.filter(owner=user, state__in=ACTIVE).exists():
             raise IntakeError("active_upload_exists")
         if Upload.objects.filter(owner=user, state__in=TERMINAL, cleanup_pending=True).exists():
@@ -97,18 +117,24 @@ def initiate(user, request_id, size, player_steam_id, storage=None):
             raise IntakeError("monthly_demo_limit", 429)
         upload = Upload(
             owner=user,
-            player_steam_id=player_steam_id,
+            mode=mode,
+            player_steam_id=players[0][0],
             request_id=request_id,
             size_bytes=size,
             key=f"inputs/{uuid.uuid4()}.dem",
             expires_at=now + timedelta(seconds=settings.UPLOAD_EXPIRE_SECONDS),
         )
         upload.save()
+        PlayerAnalysis.objects.bulk_create(
+            PlayerAnalysis(upload=upload, steam_id=steam_id, name=name, position=position)
+            for position, (steam_id, name) in enumerate(players)
+        )
         upload.multipart_id = storage.begin(upload)
         upload.save(update_fields=["multipart_id"])
-        AccountPreferences.objects.update_or_create(
-            owner=user, defaults={"last_player_steam_id": player_steam_id}
-        )
+        if mode == "individual":
+            AccountPreferences.objects.update_or_create(
+                owner=user, defaults={"last_player_steam_id": player_steam_id}
+            )
     return upload
 
 
@@ -163,6 +189,7 @@ def delete_history(user, upload_id):
         upload.selection = None
         upload.save(update_fields=["state", "report", "scripts", "selection"])
         upload.practice_reviews.all().delete()
+        upload.player_results.all().delete()
 
 
 def delete_account(user):
@@ -184,7 +211,35 @@ class TrainingSelection(ContractModel):
     reject: list[Identifier]
 
 
+def attach_player(upload, steam_id=None, *, lock=False):
+    results = upload.player_results.all()
+    if lock:
+        results = results.select_for_update()
+    if steam_id is None:
+        if upload.mode == "team":
+            raise IntakeError("player_required", 400)
+        result = results.first()
+    else:
+        if not isinstance(steam_id, str) or not re.fullmatch(r"[0-9]{17}", steam_id):
+            raise IntakeError("invalid_player_steam_id", 400)
+        result = results.filter(steam_id=steam_id).first()
+        if result is None:
+            raise IntakeError("player_not_found", 404)
+    upload.analysis_result = result
+    if result:
+        if result.status == "missing":
+            raise IntakeError("player_not_in_demo", 409)
+        if result.report is not None or upload.mode == "team":
+            upload.report = result.report
+            upload.scripts = result.scripts
+            upload.selection = result.selection
+        upload.player_steam_id = result.steam_id
+    return upload
+
+
 def validated_report(upload):
+    if not hasattr(upload, "analysis_result"):
+        attach_player(upload)
     try:
         report = AnalysisReport.model_validate_json(json.dumps(upload.report))
     except (ValueError, TypeError) as error:
@@ -193,19 +248,26 @@ def validated_report(upload):
     if report.player_steam_id != upload.player_steam_id:
         logger.error("Saved report player mismatch for upload %s", upload.pk)
         raise IntakeError("invalid_saved_report", 500)
+    if report.scenario_document and any(
+        scenario.player.steam_id != upload.player_steam_id
+        for scenario in report.scenario_document.scenarios
+    ):
+        logger.error("Saved scenario player mismatch for upload %s", upload.pk)
+        raise IntakeError("invalid_saved_report", 500)
     if (report.status == "candidates_ready") != (report.scenario_document is not None):
         logger.error("Saved report status/document mismatch for upload %s", upload.pk)
         raise IntakeError("invalid_saved_report", 500)
     return report
 
 
-def training_result(user, upload_id, *, lock=False):
+def training_result(user, upload_id, *, lock=False, steam_id=None):
     uploads = Upload.objects.exclude(state=Upload.State.DELETED)
     if lock:
         uploads = uploads.select_for_update()
     upload = uploads.get(pk=upload_id, owner=user)
     if upload.state != Upload.State.READY:
         raise IntakeError("result_not_ready")
+    attach_player(upload, steam_id, lock=lock)
     report = validated_report(upload)
     return upload, training_document(upload, report)
 
@@ -244,18 +306,18 @@ def selection_result(document, selection, selected):
     }
 
 
-def get_training_selection(user, upload_id):
-    upload, document = training_result(user, upload_id)
+def get_training_selection(user, upload_id, *, steam_id=None):
+    upload, document = training_result(user, upload_id, steam_id=steam_id)
     selection, selected = saved_selection(upload, document)
     return selection_result(document, selection, selected)
 
 
 @transaction.atomic
-def save_training_selection(user, upload_id, data):
-    upload, document = training_result(user, upload_id, lock=True)
+def save_training_selection(user, upload_id, data, *, steam_id=None):
+    upload, document = training_result(user, upload_id, lock=True, steam_id=steam_id)
     selection, selected = validate_training_selection(document, data)
     upload.selection = selection.model_dump()
-    upload.save(update_fields=["selection"])
+    persist_selection(upload)
     return selection_result(document, selection, selected)
 
 
@@ -272,9 +334,19 @@ def validate_training_selection(document, data):
 
 
 @transaction.atomic
-def submit_training_selection(user, upload_id, included, *, download, partial=None):
+def persist_selection(upload):
+    result = upload.analysis_result
+    if result and result.report is not None:
+        result.selection = upload.selection
+        result.save(update_fields=["selection"])
+    else:
+        upload.save(update_fields=["selection"])
+
+
+@transaction.atomic
+def submit_training_selection(user, upload_id, included, *, download, partial=None, steam_id=None):
     """Build and persist one locked snapshot, retaining historical rejections."""
-    upload, document = training_result(user, upload_id, lock=True)
+    upload, document = training_result(user, upload_id, lock=True, steam_id=steam_id)
     previous, _ = saved_selection(upload, document)
     if partial is not None:
         try:
@@ -297,12 +369,12 @@ def submit_training_selection(user, upload_id, included, *, download, partial=No
             raise IntakeError("scenario_not_exportable", 422, scenario_ids=failed)
         pack = build_training_pack(document, selection, include_cfg=True)
     upload.selection = selection.model_dump()
-    upload.save(update_fields=["selection"])
+    persist_selection(upload)
     return pack
 
 
-def training_pack(user, upload_id, *, include_cfg=False):
-    upload, document = training_result(user, upload_id)
+def training_pack(user, upload_id, *, include_cfg=False, steam_id=None):
+    upload, document = training_result(user, upload_id, steam_id=steam_id)
     selection, _ = saved_selection(upload, document)
     return build_training_pack(document, selection, include_cfg=include_cfg)
 
@@ -319,8 +391,8 @@ def build_training_pack(document, selection, *, include_cfg):
         raise IntakeError("scenario_not_exportable", 422) from error
 
 
-def training_export(user, upload_id, scenario_id):
-    _, document = training_result(user, upload_id)
+def training_export(user, upload_id, scenario_id, *, steam_id=None):
+    _, document = training_result(user, upload_id, steam_id=steam_id)
     scenario = next((item for item in document.scenarios if item.scenario_id == scenario_id), None)
     if scenario is None:
         raise IntakeError("scenario_not_found", 404)

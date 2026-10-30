@@ -1,9 +1,12 @@
 {% extends "trainer/base.html" %}
 {% block content %}
 <div class="page-heading"><span class="eyebrow">PERSONAL PRACTICE</span><h1>Your training library</h1><p>Group trainings from all your saved reports. Each contains all its selected scenarios. Weapon-based priority is a practice preference, not measured skill or actual buy economy.</p></div>
+{% if players %}<section class="panel"><h2>Choose a player</h2><nav class="actions" aria-label="Players">{% for steam_id, name in players %}<a class="button" href="?player={{ steam_id }}" {% if selected_player == steam_id %}aria-current="page"{% endif %}>{{ name }}</a>{% endfor %}</nav></section>{% endif %}
+{% if choose_player %}<p>Select a player to see their groups and actions to improve.</p>{% else %}
 <section class="panel">
-{% for entry in page %}<article class="queue-row"><div><span class="eyebrow">{{ entry.scenario.map.name|upper }} / {{ entry.upload.created_at|date:"j M Y, H:i" }} UTC</span><h2>{{ entry.group.selected_count }} scenario{{ entry.group.selected_count|pluralize }} · {{ entry.group.priority }}</h2>{% include "trainer/matchup.html" with item=entry.group.first %}{% if entry.group.partial %}<p class="warning">Partial selection: {{ entry.group.selected_count }} / {{ entry.group.members|length }} members.</p>{% endif %}</div><a class="button primary" href="{% url 'training' entry.upload.pk %}?scenario={{ entry.scenario.scenario_id }}">Open practice</a></article>
+{% for entry in page %}<article class="queue-row"><div><span class="eyebrow">{{ entry.player_name|default:entry.steam_id }} / {{ entry.scenario.map.name|upper }} / {{ entry.upload.created_at|date:"j M Y, H:i" }} UTC</span><h2>{{ entry.group.selected_count }} scenario{{ entry.group.selected_count|pluralize }} · {{ entry.group.priority }}</h2>{% include "trainer/matchup.html" with item=entry.group.first %}{% if entry.group.partial %}<p class="warning">Partial selection: {{ entry.group.selected_count }} / {{ entry.group.members|length }} members.</p>{% endif %}</div><a class="button primary" href="{{ entry.training_url }}?scenario={{ entry.scenario.scenario_id }}">Open practice</a></article>
 {% empty %}<h2>No selected scenarios yet</h2><p>Choose scenarios in a ready report to build your training library.</p><a href="{% url 'history' %}">View analyses</a>{% endfor %}
 </section>
 {% include "trainer/pagination.html" %}
+{% endif %}
 {% endblock %}

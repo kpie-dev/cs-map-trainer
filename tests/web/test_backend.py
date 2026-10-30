@@ -169,7 +169,9 @@ def test_attempt_persists_result_then_removes_inputs(
         tasks.process_upload(upload.pk)
     upload.refresh_from_db()
     assert upload.state == (Upload.State.READY if valid else Upload.State.UNSUPPORTED)
-    assert upload.report == report
+    assert upload.report is None
+    if report is not None:
+        assert upload.player_results.get().report == report
     assert upload.quota_charged
     assert upload.input_deleted_at
     assert not upload.cleanup_pending

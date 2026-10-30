@@ -2,6 +2,19 @@
 
 Status: **niezweryfikowane**. Dokument jest procedurą, nie dowodem integracji.
 
+## Odbiór pakietu Trener
+
+Aktualny cennik to Pro 4,99 USD/mies. i Trener 19,99 USD/mies.; wcześniejsze
+wzmianki o 7,99 USD w tym protokole pozostają opisem poprzednich odbiorów.
+Oprócz dotychczasowych prób sprawdzić skład 1 i 5 graczy, brak części/wszystkich
+zawodników w demie, osobne wybory/eksporty i izolację kont, dostęp do historii
+po wygaśnięciu Trenera oraz niezmienność składu po edycji i wznowieniu uploadu.
+Statystyki meczowe i Estimated Rating 2.0 porównać z ręcznie policzonymi
+zdarzeniami lokalnego uprawnionego dema; nie wymagać zgodności z oficjalnym HLTV.
+W Stripe test mode odebrać obie ceny, migrację starego Pro i zmianę pakietu
+dokładnie od odnowienia, bez proraty, także po opóźnionych webhookach i braku
+płatności. Atrapy Stripe nie potwierdzają tej integracji.
+
 ## Aktualny kontrakt kont i uploadu
 
 Weryfikacja i powiązywanie Steam są wyłączone. Obowiązuje konto e-mail/hasło
