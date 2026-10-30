@@ -1,5 +1,36 @@
 # Plan wykonawczy i todos do kontynuacji w nowej sesji
 
+## Aktualizacja: uproszczony przepływ i treningi grupowe
+
+**Zaimplementowane i odebrane lokalnie:** upload → aktualny etap → wybór grup →
+ZIP z CFG jednym kliknięciem lub trening z nawigacją grup/członków.
+Loader pokazuje jeden etap i spinner; polling co 2,5 s, deadline 10 minut,
+retry widoczne dopiero po błędzie/przerwie. Nie wracać do listy wszystkich etapów.
+
+Jeden checkbox obejmuje **wszystkich członków grupy**, nie reprezentatywny
+setup. Grupowanie jest przestrzenne, z kontrolą kątów, stron, klas broni
+i ograniczeń; szczegółowa reguła w README i `training_groups.py`.
+Priorytet treningu: rifle/sniper vs pistol/SMG, następnie pełne bronie obu,
+inne/nieznane zestawy i własny pistol/SMG. To preferencja oparta na broni,
+nie odczyt pieniędzy/pancerza ani zmiana statystyk analizy.
+Uczestnicy mają wspólny zapis `CT / awp / lokacja → T / tec9 / lokacja`.
+ZIP zachowuje wszystkie wybrane CFG/TXT i dodaje `training-groups.json`.
+Częściowe wybory legacy są jawne i nie są samoczynnie rozszerzane.
+
+Oceny i terminy **usunięto z aktywnego UI**; historyczne `PracticeReview`
+i zgodność operacji legacy pozostają. Biblioteka pokazuje grupy zgodnie
+z wyborem, niezależnie od ocen. Duży panel ograniczeń zastąpiły zamknięte
+szczegóły techniczne; krytyczne ostrzeżenia są nadal widoczne.
+Starsze opisy ocen/powtórek w zapisach wykonanych iteracji są historią,
+nie zadaniem do przywrócenia funkcji.
+
+Ostatni odbiór: 572 testy ukierunkowane na zmienione obszary, lint/format,
+brak migracji oraz Playwright dla Mirage/Dust2 przy 1440 × 900 i 390 × 900.
+Wiersze 140 px desktop i 135–158 px mobile; kopiowanie w pierwszym widoku.
+Przebudowano web/worker/maintenance i potwierdzono HTTP 200/statyki, bez
+restartu db/storage/mail. Nie jest to dowód działania rzeczywistego R2 ani
+CS2/Yprac. Pełny protokół: [odbiór UI](integration-validation.md#aktualny-odbiór-ścieżki-upload--wybór--trening).
+
 ## Aktualizacja: upload bez powiązania Steam
 
 Obowiązuje konto e-mail/hasło z potwierdzonym adresem, bez Steam OpenID/API.
@@ -18,22 +49,37 @@ Powtórzyć odbiór SMTP/R2/Stripe, formularza i instrukcji SteamID, retry,
 izolacji kont i limitów po zmianie gracza. Starsze zapisy o Steam OpenID,
 minimalizacji profili i limitach per SteamID poniżej są historyczne.
 
-## Aktualny punkt kontynuacji — po implementacji Dust2 i odbiorze Playwright
+## Aktualny punkt kontynuacji — obsługa siedmiu map
 
 Zakończone w kodzie i lokalnym odbiorze: parser/analiza, eksporter i paczki,
-backend, UI, deklarowane oceny/powtórki oraz Stripe Billing.
+backend, UI z grupami treningowymi oraz Stripe Billing. Oceny/powtórki
+pozostają wyłącznie jako zachowane dane i operacje historyczne.
 **Free: 3 analizy na konto w miesiącu kalendarzowym UTC.
 Pro: 7,99 USD/miesiąc bez limitu liczby analiz na koncie.**
 Limity techniczne pozostają. Nie wracamy do limitu tygodniowego.
 
-**Nowy zakres do implementacji:** Cache, Dust2, Mirage, Inferno, Nuke,
-Ancient i Anubis, zamiast docelowego ograniczenia do Mirage. Obecny kod
-obsługuje już Mirage i Dust2, wraz z eksperymentalnym eksportem, paczkami
-i dynamicznymi mapami w UI. Pozostałe pięć map nadal wymaga implementacji.
-Zadania `support-tournament-maps`,
-`adapt-multi-map-training` i `verify-tournament-maps` opisano poniżej i w planie
-projektu. Mogą postępować niezależnie od odbioru VPS i są wymagane przed
-końcowym aplikacyjnym E2E. Każda mapa wymaga osobnego odbioru Yprac.
+**Zakres zaimplementowany w aplikacji:** Cache, Dust2, Mirage, Inferno, Nuke,
+Ancient i Anubis. Wspólny katalog obejmuje parser, analizę, CLI, eksperymentalny
+eksport, paczki i UI. Testy syntetyczne obejmują siedem map; rzeczywiste dema
+Cache/Inferno/Nuke/Ancient/Anubis nadal wymagają osobnego odbioru parsera/workera.
+Zadania `support-tournament-maps` i `adapt-multi-map-training` są zakończone w kodzie.
+`verify-tournament-maps` pozostaje częściowe do odbioru rzeczywistych dem pięciu
+nowych map i pełnego uploadu. Ten odbiór oraz przygotowanie docelowego środowiska
+poprzedzają końcowe aplikacyjne E2E. Każda mapa wymaga osobnego odbioru Yprac.
+
+Odbiór rozszerzenia: **3141 testów zaliczonych, 2 opt-in pominięte** na osobnym
+PostgreSQL; rzeczywiste lokalne demo Dust2 zaliczone osobno (parser i proces
+potomny workera). Lint, format, build, Django check i brak nowych migracji potwierdzone.
+Playwright: siedem syntetycznych raportów, 34 widoki przy 1440 × 900 i 390 × 900,
+wybór grup, trening dwóch członków oraz ZIP z CFG/TXT i właściwą mapą/integracją;
+bez poziomego przepełnienia i wyjątków JavaScript. Użyto osobnego serwera i bazy,
+bez zmian danych działającego środowiska. Nie jest to odbiór rzeczywistych dem
+pięciu nowych map, zewnętrznych usług ani CS2/Yprac.
+
+Review bieżących zmian zakończone bez istotnych błędów ani regresji wymagających
+poprawek. Zakres: katalog map, analiza/eksport, manifesty, grupowanie, wybór
+scenariuszy i przepływ raport → trening. Nie zamyka to odbioru rzeczywistych dem
+ani bramek integracji w grze.
 
 Następne zadanie: **docelowy odbiór `prepare-deployment`**. Konfiguracja Caddy,
 HTTPS/proxy, statyków i harmonogramu Stripe jest już przygotowana; opis
@@ -82,7 +128,7 @@ Szczegóły: [etap Dust2](integration-validation.md#etap-dust2--osobny-odbiór).
 - Python 3.11+, `uv`, Awpy 3.1.1, kontrakt scenariuszy v1 i raport analizy v2.
 - CLI: `players`, `analyze`, `benchmark`, `validate-scenarios`, `schema`,
   `export-scenario`, `build-pack`.
-- Parser nieskompresowanych dem CS2 `de_mirage` i `de_dust2` do 1 GiB, zbiorcze migawki
+- Parser nieskompresowanych dem CS2 siedmiu map z `maps.py` do 1 GiB, zbiorcze migawki
   sprzed obrażeń, wykluczenia i grupowanie porównywalnych wygranych/przegranych.
 - Reguły `damage-window-v3`: zachowują dostępne kąty przeciwnika, a brakujący
   pitch/yaw wyliczają ku pozycji gracza, z oznaczeniem
@@ -95,7 +141,7 @@ Szczegóły: [etap Dust2](integration-validation.md#etap-dust2--osobny-odbiór).
   Jest aplikacja w `src/cs_map_trainer/web/` z responsywnym UI Tactical HUD,
   zapamiętanym wyborem sytuacji, prywatnym eksportem komend/CFG i opcjonalnym ZIP.
   Nie wykonano próby Yprac; eksport pozostaje
-  `unverified_in_game`. Są deklarowane oceny i prosta kolejka powtórek.
+  `unverified_in_game`. Biblioteka grup treningowych zastąpiła kolejkę ocen/powtórek.
 
 ## Zakończone iteracje eksportera i minimalnego backendu
 
@@ -196,9 +242,9 @@ odtworzenie, monitoring i limity), konfiguracja i rzeczywisty odbiór Stripe;
 następnie odbiór aplikacji i próby CS2/Yprac. `build-subscriptions` ma kod
 i lokalny odbiór na atrapach operatora, nie wymaga implementacji od nowa.
 
-**Skorygowany zakres:** aplikacja generuje trening z dema. Nie ma oceny przez
-trenera, pilota biznesowego ani walidacji SaaS. Wcześniej zatwierdzone deklarowane
-oceny użytkownika i powtórki zostają. Aktualne ustalenia: **Free 3 analizy
+**Historyczny zakres tej iteracji:** aplikacja generuje trening z dema. Nie ma oceny przez
+trenera, pilota biznesowego ani walidacji SaaS. Dodane wtedy oceny użytkownika
+i powtórki usunięto później z UI; dane zachowano. Ówczesne ustalenia: **Free 3 analizy
 na SteamID w miesiącu kalendarzowym UTC**, **Pro 7,99 USD/miesiąc bez limitu
 liczby analiz własnego SteamID**. Zastępuje to wcześniejszy limit 3/7 dni.
 Ograniczenia 1 GiB/pliku i jednego aktywnego zadania obowiązują również w Pro.
@@ -271,7 +317,8 @@ publiczny ACME, instalacja timera i odbiór po restarcie hosta.
 
 **Rdzeń aplikacji i abonament są zaimplementowane, ale nie ma jeszcze odebranego
 wdrożenia produkcyjnego ani potwierdzonego treningu w grze.** Nie rozpoczynać ponownie
-backendu, UI, ocen/powtórek ani Stripe Billing. Poniższe pozycje są pozostałą pracą, nie deklaracją
+backendu, UI, treningów grupowych ani Stripe Billing. Nie przywracać ocen/powtórek.
+Poniższe pozycje są pozostałą pracą, nie deklaracją
 wykonania. Nie uruchomiono ich podczas aktualizacji planu.
 
 | Zadanie wykonawcze | Rodzaj braków | Zakres i dowód zakończenia |
@@ -283,7 +330,7 @@ wykonania. Nie uruchomiono ich podczas aktualizacji planu.
 | `implement-monitoring` | Implementacja i konfiguracja | Healthchecki, alerty błędów i wieku kolejki, kontrola workera/reapera, RAM/dysku, minimalne logi bez danych dem i sekretów. Odbiór: celowo wywołana awaria jest wykryta i ma instrukcję reakcji |
 | `benchmark-target-vps` | Pomiar i dostrojenie istniejących limitów | Uprawnione dema na docelowej klasie VPS: czas, CPU, RSS, dysk i koszt analizy. Odbiór: limity dobrane z zapasem dla weba/bazy; obecne 4/5 GiB i 2 CPU nie są potwierdzonym sizingiem |
 | `verify-live-stripe` | Konfiguracja i próby rzeczywistego operatora | Moduł Stripe jest zaimplementowany. Skonfigurować cenę 7,99 USD/mies., klucze, portal i webhook; przejść rzeczywisty checkout, odnowienie, brak płatności, anulowanie, wygaszenie i usunięcie. Odbiór test mode przed live; atrapy nie wystarczą |
-| `verify-application-e2e` | Odbiór aplikacji w skonfigurowanym środowisku | Prawdziwy upload → worker → raport → wybór → kopiowanie/ZIP/CFG → ocena/powtórka oraz zakup/odnowienie/utrata abonamentu i odpowiednie kwoty; błędy, uprawnienia, usuwanie i odtworzenie. Pełny odbiór techniczny, nie pilot biznesowy |
+| `verify-application-e2e` | Odbiór aplikacji w skonfigurowanym środowisku | Prawdziwy upload → worker → raport → wybór grup → ZIP/CFG → trening członków; zakup/odnowienie/utrata abonamentu i kwoty, błędy, uprawnienia, usuwanie i odtworzenie. Bez ocen/harmonogramu ani pilota biznesowego |
 | `prove-scenario-import` | Najważniejsza niewiadoma integracji | Końcowa próba jednej, następnie 10 sytuacji na każdej z siedmiu map w CS2/Yprac: właściwa mapa/Sandbox, indeksy i gotowość bota, XYZ, oczy, broń, powtórzenie i jedno wklejenie. Odbiór według `integration-validation.md`; samo wygenerowanie komend nie wystarcza |
 
 `prepare-deployment`, backup/odtworzenie, monitoring i dobór limitów rozwijają
@@ -332,8 +379,8 @@ Do G1 potrzebny jest również tester z dostępem do CS2 i właściwego Yprac.
 
 - Jedna integracja: Yprac Hub `3070715607`, docelowo Sandbox dla Cache,
   Dust2, Mirage, Inferno, Nuke, Ancient i Anubis. Lista jest jawna, niezależna
-  od aktualnej rotacji Active Duty. Bieżące wsparcie Mirage i Dust2 opisuje stan
-  kodu, nie nowy zakres docelowy. Dostępność i zgodność każdej mapy w Yprac
+  od aktualnej rotacji Active Duty. Kod obsługuje wszystkie siedem map.
+  Dostępność i zgodność każdej mapy w Yprac
   wymagają osobnego dowodu.
   Nie przełączać samodzielnie na vanilla CS2, własny serwer/plugin ani inną usługę.
 - Po wejściu do mapy/trybu użytkownik raz wkleja ustawienie scenariusza
@@ -375,15 +422,16 @@ mogą postępować niezależnie; UI zaczyna się po gotowym backendzie.
 | `build-minimal-web` | Kod, poprawki i review gotowe; integracje zewnętrzne do odbioru | Django/PostgreSQL, prywatny intake R2, Q2, jednorazowy worker, historia i reaper; wymagane prawdziwe R2/Steam/SMTP, migracja profili i odbiór kontenera Linux/Compose | `define-saas-policies` |
 | `complete-training-backend` | Kod i lokalny odbiór gotowe | Zapis wyboru, prywatny ZIP na żądanie i komendy/CFG z raportu, bez ponownej analizy; migracja `0003_training_selection`; zewnętrzny odbiór fundamentu G2 nadal otwarty | `build-minimal-web`, `assemble-training-packs` |
 | `build-training-ui` | Kod i lokalny odbiór gotowe | Tactical HUD w szablonach Django: konta/Steam, upload/status, raport, wybór, kopiowanie i opcjonalne ZIP/CFG; usługi zewnętrzne do odbioru | `complete-training-backend` |
-| `wire-personal-training` | Kod i lokalny odbiór gotowe — G3 aplikacyjne | Deklarowane oceny, terminy 1/3/7 dni, przywracanie i prywatna kolejka; migracja `0004_practicereview`; bez telemetrii z gry | `build-training-ui` |
-| `support-tournament-maps` | Częściowe: Mirage/Dust2 | Wspólny katalog i pipeline obu map, zachowane limity, reguły i kontrakty; pięć pozostałych map nadal odrzucanych | `bootstrap-cli` |
-| `adapt-multi-map-training` | Częściowe: Mirage/Dust2 | Rzeczywiste mapy w historii, raportach, kolejce i instrukcjach, eksport obu map oraz paczki mieszane; zgodność istniejących raportów Mirage | `support-tournament-maps`, `complete-training-backend`, `wire-personal-training` |
-| `verify-tournament-maps` | Częściowe | Regresja Mirage/Dust2, rzeczywisty parser/proces potomny/eksport Dust2 i Playwright desktop/mobile na syntetycznych raportach zaliczone; pełny upload z prawdziwymi usługami i pozostałe mapy do odbioru | `adapt-multi-map-training` |
+| `wire-personal-training` | Gotowe; UI uproszczone | Biblioteka grup według wyboru, bez ocen i harmonogramu; historyczne dane i operacje legacy zachowane | `build-training-ui` |
+| `refine-group-training` | Kod i lokalny odbiór gotowe | Loader jednego etapu/2,5 s, grupy wszystkich członków, priorytet broni, wspólny opis lokacji, ZIP z CFG jednym POST i zamknięte szczegóły techniczne | `complete-training-backend`, `build-training-ui`, `wire-personal-training` |
+| `support-tournament-maps` | Kod gotowy: siedem map | Wspólny katalog i pipeline Cache/Dust2/Mirage/Inferno/Nuke/Ancient/Anubis, zachowane limity, reguły i kontrakty; inne mapy odrzucane | `bootstrap-cli` |
+| `adapt-multi-map-training` | Kod gotowy: siedem map | Rzeczywiste mapy w historii, raportach, bibliotece i instrukcjach, eksport siedmiu map i paczki mieszane; zgodność starszych raportów i manifestów | `support-tournament-maps`, `complete-training-backend`, `wire-personal-training` |
+| `verify-tournament-maps` | Częściowe | Regresja syntetyczna siedmiu map; historyczne próby Mirage/Dust2 nie zastępują rzeczywistych dem pięciu nowych map ani pełnego uploadu z prawdziwymi usługami | `adapt-multi-map-training` |
 | `add-operations-and-billing` | Częściowo gotowe — billing i konfiguracja wdrożeniowa w kodzie | Pozostałe: odbiór VPS/publicznego TLS i Stripe, backup/odtworzenie, monitoring i dobór limitów | `wire-personal-training` |
 | `prepare-deployment` | Konfiguracja i lokalny odbiór gotowe; VPS do odbioru | Istnieją Caddy/statyki, konfiguracja Django, procedura i szablony timera; odebrać domenę/ACME, instalację timera i restart hosta | `wire-personal-training` |
 | `build-subscriptions` | Kod i lokalny odbiór; prawdziwy Stripe do odbioru | 7,99 USD/mies., Pro bez limitu liczby analiz własnego SteamID, Free 3/miesiąc UTC; checkout/portal, podpisane webhooki, uzgodnienie i usuwanie; migracja `0005_billing_accounts` | `wire-personal-training` |
 | `verify-live-stripe` | Planowane — konfiguracja i odbiór | Prawdziwy Checkout/portal/webhook i cykl abonamentu w test mode przed live; okresowe uzgodnienie i reakcja na błędy | `build-subscriptions`, `prepare-deployment` |
-| `verify-application-e2e` | Planowane — techniczne E2E | Upload → raport → eksport → ocena/powtórka dla siedmiu map oraz abonament, płatności, kwoty, błędy, uprawnienia, usuwanie i odtworzenie | `verify-tournament-maps`, `wire-personal-training`, `add-operations-and-billing`, `build-subscriptions` |
+| `verify-application-e2e` | Planowane — techniczne E2E | Upload → raport → wybór grup → ZIP/CFG → trening członków dla siedmiu map; abonament, kwoty, błędy, uprawnienia, usuwanie i odtworzenie | `verify-tournament-maps`, `refine-group-training`, `add-operations-and-billing`, `build-subscriptions` |
 | `prove-scenario-import` | Końcowe próby — G1/G4 | Jedna i 10 sytuacji na każdej z siedmiu map w CS2/Yprac: indeks/gotowość, XYZ, oczy, broń, geometria, powtórzenie i jedno wklejenie; `blocked` i dowody osobno per mapa | `verify-application-e2e` |
 | `benchmark-demo-pipeline` | Częściowo gotowe | Pozostał techniczny benchmark na docelowym VPS i dobór zasobów; bez oceny trenera | `bootstrap-cli` |
 
@@ -399,7 +447,8 @@ pilot biznesowy i oceny trenerów nie są etapami planu.
 2. Kontynuować operacyjną część `add-operations-and-billing` i rzeczywisty
    odbiór Stripe/R2/Steam/SMTP oraz workera Linux. Nie przepisywać gotowego
    modułu `build-subscriptions`. Nie dodawać ocen trenerów ani pilota biznesowego.
-   Backend, UI i deklarowane powtórki są zrealizowane; nie zaczynać ich od nowa.
+   Backend, UI i treningi grupowe są zrealizowane; nie zaczynać ich od nowa.
+   Nie przywracać ocen/harmonogramu ani nie usuwać zachowanych danych legacy.
    Na docelowym VPS zastosować `0005_billing_accounts` i odebrać istniejący
    wariant `compose.production.yml` z Caddy/statykami według README.
    Obejrzeć istniejące moduły `exporting.py`, `packs.py`, `cli.py` i ich testy.
@@ -425,10 +474,21 @@ Przykładowa wiadomość startowa:
 > skonfiguruj Stripe i okresowe reconcile_subscriptions według README.
 > Bez oceny trenerów, pilota biznesowego i bramek walidacji SaaS.
 > Fundament, backend treningowy, UI Tactical HUD
-> i deklarowane powtórki już istnieją. Caddy/TLS/statyki i szablony timera są
+> i treningi grupowe już istnieją. Nie przywracaj ocen ani harmonogramu.
+> Caddy/TLS/statyki i szablony timera są
 > przygotowane oraz odebrane lokalnie; kontynuuj odbiór na VPS według README,
 > nie przepisuj gotowego przepływu ani abonamentu.
 > R2/Steam/SMTP wymagają odbioru z prawdziwą konfiguracją. Eksporter i paczki
 > są gotowym prototypem, bez próby w grze. Obowiązuje kolejność BE → UI →
 > końcowe próby CS2/Yprac; komendy przyjmujemy jako założenie implementacyjne.
 > Zachowaj istniejący kod i zastane zmiany.
+# Panel obsługi kont — zakres odbioru
+
+Implementacja obejmuje ograniczony Django Admin, MFA, role obsługowe, politykę
+indywidualnych limitów i czasowego Pro, blokady/sesje, maile allauth,
+snapshot/odświeżanie Stripe i audyt. Bez migracji tożsamości na SteamID,
+refundacji, anulowania subskrypcji lub ręcznej edycji danych płatności.
+Procedura konfiguracji i semantyka operacji są w README.
+Przed produkcyjnym udostępnieniem wykonać odbiór MFA/ról, wysyłki przez docelowy
+SMTP, synchronizacji z właściwym środowiskiem Stripe i konfiguracji HTTPS.
+Nie utożsamiać testów z atrapami z odbiorem tych usług.

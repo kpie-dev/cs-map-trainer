@@ -1,7 +1,7 @@
 # CS Map Trainer
 
 Narzędzie do przygotowania treningu własnych pojedynków z CS2. Obecnie **CLI czyta
-dema `.dem` z Mirage i Dust2, wyświetla graczy i analizuje porównywalne wygrane oraz
+dema `.dem` z Cache, Dust2, Mirage, Inferno, Nuke, Ancient i Anubis, wyświetla graczy i analizuje porównywalne wygrane oraz
 przegrane pojedynki**. Wynikiem jest raport JSON z kandydatami do treningu
 przegranych sytuacji i ich ustawieniem przestrzennym. Działa też
 walidator kontraktu scenariuszy v1.
@@ -9,7 +9,7 @@ walidator kontraktu scenariuszy v1.
 **Jest prototyp eksportu do konsoli/CFG i paczek ZIP, nie ma potwierdzonego
 importu do gry.** Cel to
 [Yprac Hub by Yesber, Workshop `3070715607`](https://steamcommunity.com/sharedfiles/filedetails/?id=3070715607),
-Mirage lub Dust2 / Sandbox. Eksporter zakłada osobno indeks gracza bota `2` i indeks jego
+właściwa mapa / Sandbox. Eksporter zakłada osobno indeks gracza bota `2` i indeks jego
 encji/pawn `2` po usunięciu botów. Nie wyszukuje indeksów dynamicznie.
 Pozycje, kierunek oczu, broń, kolejność wykonania i zgodność mapy nadal wymagają
 potwierdzenia w grze. Wyniki mają status `unverified_in_game`.
@@ -20,7 +20,8 @@ konta e-mail, SteamID64 podawane przy demie, prywatny upload R2, jednorazowa ana
 i prywatna historia z zapamiętywaniem wyboru sytuacji, eksportem pojedynczej
 linii komend i opcjonalnymi paczkami ZIP. Responsywne szablony korzystają ze
 stylistyki Tactical HUD z `design/`, bez zewnętrznych skryptów i fikcyjnych statystyk.
-Są deklarowane oceny treningu i prosta kolejka powtórek, bez telemetrii z gry.
+Biblioteka treningów obejmuje grupy wszystkich wybranych podobnych sytuacji bez ocen i harmonogramu,
+bez telemetrii z gry; historyczne oceny pozostają zachowane.
 Jest też moduł Stripe Billing: **Free — 3 analizy na miesiąc kalendarzowy UTC;
 Pro — 7,99 USD/mies. bez limitu liczby analiz na koncie serwisu**.
 Integracje z rzeczywistym R2, SMTP i Stripe wymagają
@@ -40,7 +41,9 @@ uv run cs-map-trainer schema
 ### Własne demo
 
 Obsługiwane są nieskompresowane dema CS2 `.dem`, do 1 GiB, z map
-`de_mirage` i `de_dust2`. Mapa jest odczytywana z nagłówka dema, nie z nazwy pliku.
+`de_cache`, `de_dust2`, `de_mirage`, `de_inferno`, `de_nuke`, `de_ancient`
+i `de_anubis`. To jawny zakres produktu, niezależny od rotacji Active Duty.
+Mapa jest odczytywana z nagłówka dema, nie z nazwy pliku.
 Pliki CS:GO, archiwa i pozostałe mapy są jawnie odrzucane.
 
 ```sh
@@ -91,10 +94,43 @@ Raport zawiera:
 - wersje parsera/reguł, hash dema, mapę/build i ograniczenia rekonstrukcji.
 
 W raporcie webowym główną sekcją jest **Choose your duels**, służąca do wyboru
-konkretnych przegranych pojedynków do treningu. Ostrzeżenia dotyczące danego
+grup przegranych pojedynków do treningu (wszystkich członków, nie tylko przykładu). Ostrzeżenia dotyczące danego
 scenariusza pozostają widoczne, a identyfikatory, ticki, pozycje i kąty są
 w rozwijanych szczegółach. Wspólne ograniczenia rekonstrukcji opisujemy raz,
-w sekcji **Limitations and exclusions**.
+w zamkniętej sekcji **Technical analysis details**, bez dużego panelu ograniczeń.
+
+### Grupy treningowe i priorytet broni
+
+Wspólny helper `training_groups.py` służy raportowi, wyborowi, treningowi,
+bibliotece i metadanym ZIP. Nie zmienia parsera, surowego raportu ani `analysis.groups`
+(to nadal statystyki strat z dokładnymi broniami). Grupuje wyłącznie zachowane
+scenariusze, zwykle maksymalnie 10; nie odzyskuje kandydatów pominiętych limitem.
+
+Deterministycznie, po ID scenariusza, dołącza do pierwszej grupy zgodnej
+**z każdym jej członkiem**: identyczna mapa/build/rewizja, demo, gracz, strony,
+parser/reguły i zestaw ograniczeń, te same klasy broni osobno dla obu uczestników.
+Dla obu pozycji odległość 3D ≤192 jednostki i różnica Z ≤64; różnica pitch ≤20°,
+kołowa różnica yaw ≤30°, roll identyczny. To konserwatywna heurystyka, nie
+zweryfikowana kategoria taktyczna; łańcuch pobliskich punktów nie połączy
+odległych miejsc. Sama wspólna nazwa calloutu nigdy nie wystarcza.
+Grupa ma stabilny hash uporządkowanych ID członków. Podgląd pokazuje jeden
+wybrany przykład; szczegóły i trening udostępniają każdego członka z jego
+własną bronią, pozycją, lokacją i komendami.
+
+Kolejność ćwiczeń jest preferencją, **nie pomiarem błędów, skilla ani ekonomii**:
+1. rifle/sniper gracza vs pistol/SMG przeciwnika;
+2. rifle/sniper vs rifle/sniper, także AK47/M4A1-S i AWP/AK47;
+3. pozostałe lub nieznane zestawy;
+4. własny pistol/SMG.
+
+Rifle: `ak47 aug famas galilar m4a1 m4a1_silencer sg556`; sniper:
+`awp g3sg1 scar20`. Pistolety i SMG są jawnie wymienione w `WEAPON_CLASSES`,
+tak jak osobne klasy shotgun, machine_gun i scout (`ssg08`).
+Nie przypisujemy shotgunów/karabinów maszynowych/scouta magicznie do „full buy”
+lub „eco”. Każdy identyfikator `GUNS` ma jawną klasę; nieznana broń ma osobną,
+neutralną kategorię (nie domyślne eco i nie łączy się z inną nieznaną bronią).
+„Full gun”/„eco” to wyłącznie skróty oparte o klasy broni; pieniądze, armor
+i rzeczywisty zakup nie są zapisane. Kolejność grup to priorytet, następnie ID grupy.
 
 Zwijana sekcja **Duel statistics** poniżej listy pokazuje statystyki grup:
 próby, wygrane, przegrane i win rate jako procent (np. 12.5%). Dotyczą one
@@ -104,7 +140,7 @@ według liczby przegranych i nie stanowią oceny umiejętności. Komórki siatki
 w szczegółach technicznych nie są nazwami miejscówek.
 
 Karty pojedynków pokazują **nazwy lokacji ofiary i zabójcy odczytane z demka**
-na Mirage i Dust2. Awpy 3.1.1 nie zwraca ich w `snapshots()`, ale udostępnia
+na wszystkich siedmiu obsługiwanych mapach. Awpy 3.1.1 nie zwraca ich w `snapshots()`, ale udostępnia
 surowe pole przez `Demo.ticks(props=["m_szLastPlaceName"], players_only=True)`.
 To dodatkowy przebieg po demie, wykonywany raz, tylko gdy wybrano scenariusze.
 Z wyniku zachowujemy wyłącznie nazwy potrzebnych graczy w dokładnych
@@ -124,8 +160,9 @@ geometrii map, radarów ani innych assetów; usunięto ręczne prostopadłościa
 Lokacje zapisują się w raporcie przed usunięciem wejściowego demka. Starsze
 raporty bez metadanych pokazują `Not recorded in this report` z informacją
 o konieczności ponownego przesłania demka. Nie można odzyskać tych danych
-z usuniętego wejścia. Kontrakt scenariuszy, grupowanie, wybory i eksport
-pozostają bez zmian; metadane lokacji nie trafiają do komend treningowych.
+z usuniętego wejścia. Sam odczyt lokacji nie zmienia kontraktu scenariuszy
+ani statystycznego grupowania parsera; metadane lokacji nie trafiają do komend
+treningowych. Grupy treningowe UI opisano osobno powyżej.
 
 Domyślnie wybieranych jest maksymalnie 10 scenariuszy, z pierwszymi obrażeniami
 między oboma graczami w końcowym oknie 128 ticków przed śmiercią.
@@ -201,10 +238,12 @@ ZIP zawiera `manifest.json`, wybrane `scenarios.json`, `README.txt`,
 `console/scenario-NNNN.txt` i opcjonalnie `cfg/scenario-NNNN.cfg`.
 Każdy TXT ma **jedną linię jednego scenariusza** do wklejenia po wejściu
 do właściwej mapy/Sandbox z klientem Yprac. Instrukcje wskazują mapę każdego
-pliku; przy paczce mieszanej Mirage/Dust2 trzeba zmieniać sesję na właściwą mapę.
+pliku; przy paczce mieszanej trzeba zmieniać sesję na właściwą mapę.
 Manifest zachowuje `yprac_hub_mirage_sandbox` dla Mirage, używa
-`yprac_hub_dust2_sandbox` dla Dust2 i `yprac_hub_multi_map_sandbox` dla wyboru
-mieszanego. Format paczki pozostaje v1; stare manifesty Mirage są obsługiwane.
+`yprac_hub_dust2_sandbox` dla Dust2 oraz analogiczne `yprac_hub_<map>_sandbox`
+dla pozostałych map; `yprac_hub_multi_map_sandbox` oznacza wybór mieszany.
+Format paczki pozostaje v1; stare manifesty Mirage są obsługiwane.
+Te identyfikatory opisują cel prototypu, nie potwierdzają dostępności map w Yprac.
 Powtórzenie polega na ponownym
 wklejeniu tej samej linii, nie na niepotwierdzonym zachowaniu `restart`.
 Pliki są numerowane niezależnie od ID; manifest mapuje je na źródłowe sytuacje
@@ -234,7 +273,7 @@ encji `2`. Nie zapisują poprzednich wartości; manifest zawiera pełną listę
 zmian. Po treningu opuść sesję i sprawdź ustawienia przed dalszą grą.
 Nie używaj na matchmakingu ani współdzielonym serwerze.
 
-Walidacja eksportera dopuszcza tylko `de_mirage` i `de_dust2`, jawną listę broni palnych,
+Walidacja eksportera dopuszcza tylko siedem map z katalogu `maps.py`, jawną listę broni palnych,
 skończone XYZ w zakresie ±16384 i roll `0`. Zachowuje pitch/yaw i oznaczenia
 przybliżenia przeciwnika. Budżet pojedynczej linii to 1023 bajty ASCII;
 to limit prototypu, nie potwierdzona pojemność konsoli w danym buildzie.
@@ -351,7 +390,7 @@ uv build
 
 Awpy 3.1.1 jest przypiętym parserem, a `uv.lock` obejmuje jego zależności.
 Domyślne testy nie pobierają dem. Test integracyjny można uruchomić na lokalnym,
-dopuszczonym do przetwarzania demie Mirage lub Dust2 zawierającym kwalifikujące się starcia:
+dopuszczonym do przetwarzania demie dowolnej obsługiwanej mapy zawierającym kwalifikujące się starcia:
 
 ```sh
 CS_MAP_TRAINER_DEMO=data/match.dem uv run pytest tests/integration
@@ -374,6 +413,12 @@ i kątów z migawkami, eksport paczki oraz rzeczywisty proces potomny parsera
 używany przez worker. Nagłówek potwierdził `de_dust2`, build `10924`.
 Nie jest to odbiór rzeczywistego R2 ani komend w CS2/Yprac.
 
+Cache, Inferno, Nuke, Ancient i Anubis korzystają z tego samego pipeline'u,
+z regresją na danych syntetycznych. Brakuje lokalnych dem tych map do osobnego
+odbioru rzeczywistego parsera i workera. Obsługa aplikacyjna nie potwierdza
+zgodności geometrii ani dostępności Sandbox; każda z siedmiu map wymaga osobnego
+odbioru CS2/Yprac, a eksport pozostaje `unverified_in_game`.
+
 ## Aplikacja webowa i backend
 
 Stos: Django 5.2, PostgreSQL, Django-Q2 z brokerem ORM i jeden worker.
@@ -388,9 +433,9 @@ prywatnymi operacjami monolitu z sesją Django i CSRF. Obraz CLI pozostaje osobn
 | Strona główna i upload | `/` |
 | Konto, weryfikacja e-mail, podpowiedź SteamID i usunięcie konta | `/account/` |
 | Prywatna historia ze stronicowaniem | `/history/` |
-| Status zadania, raport i zapis wyboru/odrzuceń | `/uploads/<id>/` |
-| Jedna aktywna sytuacja, kopiowanie komend i ocena | `/uploads/<id>/training/` |
-| Nowe/do powtórki, nadchodzące i nietrafne | `/practice/` |
+| Status zadania, checkboxy wyboru i pobranie treningu | `/uploads/<id>/` |
+| Jedna aktywna sytuacja, kopiowanie komend i nawigacja | `/uploads/<id>/training/` |
+| Biblioteka wybranych sytuacji ze wszystkich gotowych raportów | `/practice/` |
 
 Logowanie przekierowuje do historii. Formularze allauth (rejestracja,
 potwierdzenie adresu, reset hasła i wylogowanie) korzystają ze wspólnej powłoki.
@@ -401,36 +446,67 @@ oddzielnie dla konta, razem z wybranym SteamID. Przy ponowieniu trzeba wybrać t
 potwierdzenia udanego transferu nie wysyłamy pliku drugi raz. Nie jest to retry
 parsowania. Po wygaśnięciu rezerwacji wymagany jest nowy upload.
 
-Status aktywnego zadania odświeża się co 5 sekund, maksymalnie przez 10 minut;
-po błędzie sieci odświeżanie zatrzymuje się z komunikatem i ręcznym przyciskiem.
+Loader pokazuje rzeczywiste etapy: **Upload → Verify file → Queued →
+Processing demo → Ready**. Tylko transfer ma procent z XHR; potwierdzanie
+pliku trwa podczas żądania `complete`, a kolejka i przetwarzanie wynikają ze
+stanu serwera. `running` obejmuje też pobranie wejścia i przygotowanie wyniku;
+nie dzielimy go na pozorowane podetapy ani ETA.
+Lekki prywatny `GET /backend/uploads/<id>/status/` zwraca tylko `state` i `error`,
+bez ładowania raportu, skryptów i wyboru. Pełny odczyt zachowuje dotychczasowy kontrakt.
+Loader pokazuje tylko aktualny rzeczywisty etap i dostępny spinner, nie listę etapów.
+Status aktywnego zadania odświeża się co 2,5 sekundy, maksymalnie przez 10 minut
+według upływu czasu (nie liczby żądań). Normalnie nie ma przycisku odświeżania;
+dopiero błąd sieci/sesji lub upływ limitu udostępnia Retry status updates.
 Nie pokazujemy pozorowanych procentów analizy. Raport rozdziela liczebność próby,
 porażki i wygrane, ograniczenia i brak kandydatów. Nie nazywamy wyniku werdyktem
 o błędzie. Nie pokazujemy niezmierzonych wyników meczu, reakcji ani mapy/radaru
 bez zweryfikowanego podkładu.
 
-Zapisz wybór przed przejściem do treningu; wybór paczki nie może być pusty.
-Główna ścieżka to skopiowanie pełnej linii jednej sytuacji. Odmowa dostępu
-do schowka daje komunikat i zaznacza tekst do ręcznego skopiowania. ZIP/CFG są
-opcjonalne. Raporty, wybór i oceny działają bez ponownego parsowania lub dostępu do R2.
+Wszystkie dostępne sytuacje są początkowo zaznaczone. Jeden checkbox na grupę
+obejmuje wszystkich jej członków. Liczniki pokazują osobno grupy i scenariusze;
+„Select all” i „Clear selection” zastępują trzy stany w UI. Nowe odznaczenie
+oznacza pominięcie; historyczne odrzucenie pozostaje do ponownego zaznaczenia.
+Pusty wybór można edytować, lecz nie zapisać jako trening.
+Historyczny częściowy wybór ma indeterminate checkbox w JS oraz jawną informację
+i opcję zachowania/wyczyszczenia bez JS. Niezmieniony formularz zachowuje dokładnie
+dotychczasowych członków; zaznaczenie grupy jawnie dodaje wszystkich. POST przenosi
+zwalidowaną migawkę częściowych ID, więc kolejne pobranie z tej samej strony
+nie rozszerza przypadkowo wyboru po zmianie w drugiej karcie.
 
-### Deklarowane oceny i powtórki
+**Download training (.zip)** zapisuje bieżące checkboxy i zwraca ZIP z CFG,
+TXT, manifestem i instrukcją w jednym POST, bez osobnego zapisu ani nawigacji
+w JS. Budowanie i zapis używają tego samego walidowanego raportu i wyboru
+pod blokadą transakcyjną; druga karta nie podmieni zwracanej paczki.
+Błąd eksportu nie zapisuje wyboru ani nie pomija sytuacji. UI zachowuje
+checkboxy, wskazuje nieeksportowalne sytuacje i wymaga jawnego odznaczenia.
+JS sprawdza HTTP i typ ZIP, nie zapisuje strony błędu jako archiwum.
+Zwykły formularz POST działa także bez JS.
+**Open practice** również zapisuje bieżące checkboxy przed przejściem.
+Stary GET eksportu pozostaje zgodny: CFG nadal wymaga `?include_cfg=true`.
+`training-groups.json` jest addytywnym plikiem z ID grupy, dostępnymi i wybranymi
+ID członków oraz priorytetem. Nie zmienia kontraktu manifestu/paczki v1.
 
-Po ćwiczeniu można samodzielnie oznaczyć sytuację: **trudne** (powtórka za 1 dzień),
-**wykonane** (za 3 dni), **łatwe** (za 7 dni) lub **nietrafne** (bez terminu,
-poza aktywną kolejką do ręcznego przywrócenia). Terminy są liczone na serwerze
-od chwili oceny i wyświetlane w UTC. Ponowna ocena zastępuje poprzednią
-i wyznacza nowy termin; nie prowadzimy historii prób ani statystyk wygranych.
-Przywrócenie usuwa bieżącą ocenę i czyni sytuację ponownie nową.
+Trening pokazuje numer grupy i członka, komendy, Previous/Next group,
+przełączanie każdego wybranego członka, lokacje i krótki start przed pełną
+listą sytuacji i zamkniętymi szczegółami technicznymi. Odmowa dostępu do schowka
+rozwija tekst i zaznacza pełną linię do ręcznego skopiowania. Uruchom właściwą
+mapę/Sandbox, wklej jedną linię lub skopiuj CFG do katalogu gry i wykonaj `exec`.
+Powtórzenie tej samej linii/CFG odtwarza tę samą sytuację. Raporty, wybór
+i eksport działają po usunięciu dema, bez parsera/R2; zapisane `scripts` nie są
+źródłem zaufanych komend.
 
-`PracticeReview` przechowuje tylko bieżącą ocenę, czas i termin na parę
-raport/scenariusz. Kolejka bierze wszystkie gotowe prywatne raporty, respektuje
-ich aktualny wybór, sortuje po terminie (nowe po dacie raportu), a następnie
-po ID raportu i scenariusza, i stronicuje wynik po 20 sytuacji. Nie ogranicza
-się do ostatnich 100 raportów. Niewybrane sytuacje zachowują oceny, ale nie są
-w kolejce. „Nietrafne” nie zmienia wyboru paczki; zmień go osobno w raporcie.
-Usunięcie raportu lub konta usuwa również oceny i terminy.
+### Biblioteka treningów i dane historycznych ocen
 
-**Ocena jest deklaracją, nie wynikiem z CS2.** Kopiowanie/pobranie nie oznacza
+`/practice/` obejmuje wszystkie gotowe prywatne raporty, nie tylko ostatnie 100,
+respektuje bieżący wybór i stronicuje po 20 grup treningowych, bez duplikowania
+wierszy ich członków. Porządek jest stabilny: priorytet broni, data raportu,
+ID raportu, ID grupy. Oceny i terminy
+nie filtrują ani nie sortują tej listy. Z interfejsu usunięto ocenianie,
+harmonogram i przywracanie. Model i rekordy `PracticeReview` pozostają
+bez migracji usuwającej dane, a operacje legacy zachowują zgodność.
+Usunięcie raportu lub konta usuwa również historyczne oceny i terminy.
+
+Kopiowanie/pobranie nie oznacza
 wykonania ćwiczenia. Nie ma automatycznego uruchamiania gry, powiadomień,
 pomiaru poprawy ani potwierdzonego importu Yprac.
 
@@ -491,7 +567,8 @@ dodawaj do Git. Historyczna migracja `0002_minimize_steam_profiles`
 usuwała nadmiarowe pola ze starszych profili. Migracja `0003_training_selection`
 dodaje zapis wyboru przy wyniku; istniejące raporty domyślnie obejmują wszystkie
 sytuacje i nie są przepisywane.
-Migracja `0004_practicereview` dodaje bieżące oceny i terminy powtórek.
+Historyczna migracja `0004_practicereview` dodaje oceny i terminy powtórek;
+rekordy pozostają zachowane, lecz UI i biblioteka ich nie używają.
 Migracja `0005_billing_accounts` dodaje konta Stripe, stan dostępu i minimalne
 potwierdzenia obsłużonych webhooków. Zmiana kwoty Free na miesiąc UTC obejmuje
 istniejącą, zachowaną ewidencję uploadów; nie zeruje bieżącego zużycia.
@@ -631,8 +708,11 @@ to sam hostname, bez protokołu, portu, ścieżki, wildcarda ani listy domen.
 Użyj losowego, silnego `DJANGO_SECRET_KEY` oraz hasła PostgreSQL.
 Rozszerzenie produkcyjne wymusza `DEBUG=0`, host/origin i adres publiczny
 na podstawie `CADDY_DOMAIN`. Włącza `DJANGO_TRUST_PROXY=1` **tylko dla weba**.
-Po włączeniu tej opcji Django ufa `X-Forwarded-Proto`; nie wolno wystawiać
-Gunicorna bezpośrednio. Caddy domyślnie zastępuje niezaufane nagłówki
+Po włączeniu tej opcji Django ufa `X-Forwarded-Proto`, a allauth używa adresu
+klienta z ostatniej pozycji `X-Forwarded-For` (jeden zaufany hop: Caddy), aby
+nie współdzielić limitów logowania/MFA między wszystkimi klientami proxy.
+Przy `DJANGO_TRUST_PROXY=0` nagłówki adresu klienta są ignorowane.
+Nie wolno wystawiać Gunicorna bezpośrednio. Caddy domyślnie zastępuje niezaufane nagłówki
 `X-Forwarded-*` klienta, a konfiguracja nie dodaje zaufanych proxy.
 Cookies pozostają secure, a HTTP przekierowuje do HTTPS.
 
@@ -748,6 +828,7 @@ produkcyjna izolacja i twardy limit kontenera dotyczą wariantu Linux/Docker.
 | Rezerwacja/upload | `POST /backend/uploads/`, JSON: UUID `request_id`, `size_bytes`, tekst `player_steam_id`, `has_upload_rights: true`; odpowiedź zawiera podpisany URL `PUT` |
 | Ukończenie i kolejka | `POST /backend/uploads/<id>/complete/` |
 | Status/wynik/komendy | `GET /backend/uploads/<id>/` |
+| Lekki prywatny status | `GET /backend/uploads/<id>/status/`, tylko `state` i `error` |
 | Odczyt wyboru | `GET /backend/uploads/<id>/selection/` |
 | Zapis całego wyboru | `POST /backend/uploads/<id>/selection/`, JSON: `include` (lista ID lub `null`) i `reject` (lista ID) |
 | Komendy pojedynczej sytuacji | `GET /backend/uploads/<id>/scenarios/<scenario_id>/export/`, domyślnie JSON z `console_line` i metadanymi; opcjonalnie `?format=cfg` |
@@ -776,18 +857,29 @@ oddzielony od wyniku analizy.
 Nawigacja przeglądarki z `Accept: text/html` otrzymuje czytelną stronę błędu;
 żądania JSON zachowują kody błędów. Brak konfiguracji R2 daje jawne 503.
 
-Formularze UI zapisują wybór przez `POST /uploads/<id>/selection/`, a oceny przez
+Formularz UI wysyła `POST /uploads/<id>/selection/`: `selection_ui=groups`,
+powtarzane `group=<group_id>` i `intent=download` (zapis i ZIP z CFG)
+lub `intent=practice` (zapis i przekierowanie do treningu). Stary formularz
+`selection_ui=checkboxes` z powtarzanym `include=<scenario_id>` oraz
+`choice_<id>=include|omit|reject` pozostaje zgodny. Endpoint ocen legacy
 `POST /uploads/<id>/scenarios/<scenario_id>/review/` (`rating`: `done`, `easy`,
-`hard`, `irrelevant` lub `restore`). Wymagają sesji, potwierdzonego e-maila i CSRF.
+`hard`, `irrelevant` lub `restore`) pozostaje dostępny bez kontrolek w UI.
+Operacje wymagają sesji, potwierdzonego e-maila i CSRF.
 Kandydaci i własność wynikają z raportu, nie z payloadu klienta.
 Nie zmieniamy stanu przez GET.
+Tylko dla częściowych grup formularz dodaje `partial_<group_id>=preserve|clear`
+i powtarzane `members_<group_id>=<scenario_id>`: dokładny, niepusty podzbiór
+tej grupy. Zaznaczony `group` wybiera wszystkich członków; `preserve` przy
+niezaznaczonej grupie zachowuje wyłącznie wymieniony podzbiór. Nieznane/zdublowane
+ID i członkowie spoza grupy są odrzucani. Historyczne `reject` nadal obowiązuje
+aż do jawnego włączenia danej sytuacji.
 
 ### Wybór sytuacji i eksport z zapisanego raportu
 
-Główna ścieżka treningu to pobranie `console_line` jednej sytuacji i jedno
-wklejenie do konsoli CS2/Yprac po wejściu do właściwej mapy i trybu.
-ZIP jest opcjonalnym pobraniem wielu sytuacji, nie wymaganiem uruchomienia
-treningu. Backend nie instaluje plików w katalogu gry.
+Główna akcja raportu pobiera ZIP z aktualnym wyborem i CFG. Alternatywnie
+otwórz trening i skopiuj `console_line` jednej sytuacji. Po wejściu do właściwej
+mapy i Sandbox wklej pełną linię lub wykonaj CFG. ZIP nie jest wymagany
+do korzystania ze schowka. Backend nie instaluje plików w katalogu gry.
 
 Wybór dotyczy kandydatów w `report.scenario_document.scenarios`, a nie nowych
 sytuacji przesyłanych przez klienta. Odczyt `/selection/` zwraca `include`,
@@ -853,7 +945,7 @@ CS_MAP_TRAINER_R2_CONTRACT=1 uv run pytest tests/integration/test_r2_contract.py
 Próba sprawdza odrzucenie innego rozmiaru, poprawny upload, zakończenie, odczyt,
 unieważnienie URL i usunięcie. Bez tych prób nie oznaczamy integracji jako
 potwierdzonej. Selekcja i autoryzowane eksporty backendu są zaimplementowane,
-tak samo jak treningowe UI, deklarowane oceny użytkownika i powtórki.
+tak samo jak treningowe UI i biblioteka wybranych sytuacji bez harmonogramu.
 Pakiet trenera/akademii jest poza zakresem; wskazanie gracza nie zwalnia
 z obowiązku posiadania praw do przesłania i analizy dema.
 
@@ -935,11 +1027,101 @@ Automatyczne testy korzystają z atrap Stripe. Rzeczywista sesja Checkout,
 dostarczenie webhooków i pobranie opłaty wymagają powyższej konfiguracji;
 nie zostały potwierdzone prawdziwymi poświadczeniami w tej sesji.
 
+## Panel obsługi kont `/admin/`
+
+Panel wykorzystuje Django Admin, ale udostępnia wyłącznie odczyt danych i dedykowane
+operacje obsługowe. Nie służy do edycji haseł, ręcznego potwierdzania adresów,
+usuwania kont ani modyfikowania danych Stripe. Konto e-mail nadal jest właścicielem
+limitów i płatności. SteamID64 z dem i ostatnia podpowiedź są nieweryfikowane:
+wyszukiwanie może wskazać wiele kont i nie łączy ich danych.
+
+Po aktualizacji zależności/obrazu wykonaj backup, migracje i konfigurację ról:
+
+```sh
+docker compose run --rm web cs-map-trainer-web migrate
+docker compose run --rm web cs-map-trainer-web configure_support_roles
+```
+
+Migracje tworzą również tabelę `trainer_shared_cache` dla współdzielonych limitów
+logowania/MFA i ochrony przed ponownym użyciem kodu TOTP między workerami Gunicorn.
+Zastosuj migracje przed uruchomieniem nowych workerów. Nie zastępuj tego backendu
+lokalnym cache per proces w środowisku wieloworkerowym. Cache nie jest źródłem
+limitów analiz ani ręcznych uprawnień konta.
+
+Właściciel loguje się kontem superuser przez standardowy ekran allauth
+(`/accounts/login/`), potwierdza e-mail i konfiguruje aplikację TOTP oraz kody
+odzyskiwania. Panel wymaga ukończonego drugiego czynnika w bieżącej sesji;
+sam `is_staff`, hasło lub samo skonfigurowanie TOTP nie wystarczają.
+Domyślne logowanie Django Admin nie jest alternatywną ścieżką bez MFA.
+Operacje obsługowe wymagają świeżego ponownego uwierzytelnienia.
+Zapisz kody odzyskiwania poza aplikacją w bezpiecznym miejscu.
+Reset hasła nie usuwa MFA. Obsługa nie może resetować MFA administratorów;
+awaryjne odzyskanie wymaga uprawnionego operatora serwera, potwierdzenia tożsamości
+i kontrolowanej procedury, nie publicznego endpointu.
+
+Przydzielaj dostęp wyłącznie istniejącym, imiennym kontom. Polecenie nie tworzy
+konta i nie nadaje superusera:
+
+```sh
+docker compose run --rm web cs-map-trainer-web configure_support_roles \
+  --email support@example.com --role Support
+docker compose run --rm web cs-map-trainer-web configure_support_roles \
+  --email operator@example.com --role "Account Operators"
+docker compose run --rm web cs-map-trainer-web configure_support_roles \
+  --email operator@example.com --remove
+```
+
+Bez parametrów polecenie tylko idempotentnie synchronizuje minimalne uprawnienia
+grup, bez dodawania członków. `Support` ma odczyt i wysyłkę linków;
+`Account Operators` dodatkowo zmiany limitów, ręcznego Pro, blokad i odświeżanie
+Stripe. Role nadaje operator serwera, nie obsługa przez edytor użytkownika.
+Zmiana/usunięcie roli usuwa również bezpośrednio przypisane uprawnienia obsługowe,
+nie naruszając innych uprawnień użytkownika. Jeśli dodatkowa grupa przyznaje
+uprawnienia wykraczające poza docelową rolę, polecenie odmawia zmiany bez
+częściowego zapisu; najpierw trzeba usunąć konfliktujące członkostwo.
+Konta staff/superuser i konto samego operatora nie podlegają akcjom obsługowym.
+
+Indywidualny miesięczny limit zastępuje domyślne 3 analizy i pozostaje w kolejnych
+miesiącach UTC. Puste pole przywraca domyślną wartość; zero oznacza brak darmowej
+kwoty, nie odebranie Pro. Obniżenie limitu nie kasuje zużycia ani nie przerywa zadań.
+Ręczne Pro wymaga przyszłej daty końca i jest oddzielne od płatnego Pro.
+Wygaśnięcie/odwołanie ręcznego dostępu nie zmienia opłaconego okresu Stripe.
+Żadna z tych operacji nie omija limitów parsera, rozmiaru ani jednego aktywnego zadania.
+
+**Blokada nie anuluje subskrypcji i opłaty mogą być nadal naliczane.**
+Blokada odcina logowanie/prywatne funkcje i unieważnia stare sesje również po
+odblokowaniu. Dane pozostają, rozpoczęte analizy mogą się zakończyć.
+Wydany wcześniej URL R2 może pozostać ważny do swojego terminu, ale zablokowane
+konto nie zatwierdzi uploadu; istniejący mechanizm sprzątania usuwa porzucone wejście.
+Anulowanie i zwroty obsługuje się oddzielnie w Stripe.
+
+Panel pokazuje lokalny snapshot subskrypcji i czas synchronizacji, nie pełną
+historię płatności/faktur. Odświeżanie wymaga jawnej akcji POST; odczyt karty
+nie odpytuje Stripe. Błąd odświeżenia nie potwierdza sukcesu ani nie zastępuje stanu
+fikcyjnymi wartościami. Linki do Stripe rozróżniają środowisko testowe i live.
+
+Wysyłka potwierdzenia adresu jest dostępna tylko dla niezweryfikowanego bieżącego
+adresu głównego, reset tylko dla zweryfikowanego adresu konta z hasłem.
+Linki korzystają z `PUBLIC_BASE_URL`, standardowych tokenów i terminów allauth.
+Nie można wpisać dowolnego odbiorcy. Administracyjne wysyłki mają współdzielony
+cooldown 180 sekund na konto/typ wiadomości oraz limit 20 prób na operatora/godzinę,
+niezależnie od dodatkowych ograniczeń allauth. Nie ma wysyłek masowych.
+Sukces oznacza przyjęcie przez serwer poczty, nie potwierdzone doręczenie.
+Po niepewnym błędzie SMTP sprawdź stan przed ponowieniem.
+
+Operacje wymagają potwierdzenia i uzasadnienia. Dziennik przechowuje operatora,
+cel, czas UTC, ograniczone wartości przed/po i wynik, bez haseł, tokenów i payloadów.
+W panelu jest tylko do odczytu; nie jest odpornym na ingerencję administratora bazy
+zewnętrznym rejestrem audytowym. Utrzymuj HTTPS, bezpieczne cookies, aktualizacje,
+ochronę hostingu i osobne konta operatorów; sam adres `/admin/` nie jest zabezpieczeniem.
+Przed udostępnieniem sprawdź MFA, uprawnienia, blokady, pocztę i Stripe w docelowym
+środowisku. Atrapy używane w testach nie potwierdzają działania prawdziwych usług.
+
 ## Kolejne bramki
 
 Procedurę testu integracji opisuje [protokół G1](docs/integration-validation.md).
 Do końcowego odbioru trzeba zweryfikować interfejs Yprac Hub/Sandbox,
-wymagania klienta i konkretne rewizje map Mirage oraz Dust2. Udokumentowane `place`, `savepos`, `loadpos`
+wymagania klienta i konkretne rewizje wszystkich siedmiu map. Udokumentowane `place`, `savepos`, `loadpos`
 i `swap` pomagają w ustawianiu sytuacji, ale nie potwierdzają importu dowolnych
 XYZ i kątów z dema. Hub nie jest sam w sobie dowodem zgodności mapy.
 
@@ -949,7 +1131,8 @@ G1 nie blokuje BE/UI, ale pozostaje wymagane przed deklarowaniem
 zweryfikowanego treningu. Testy kodu i aplikacji są wykonywane na bieżąco.
 Pozostają konfiguracja i odbiór prawdziwego Stripe, wdrożenie i techniczny benchmark VPS.
 Nie ma etapu oceny przez trenera, pilota biznesowego ani walidacji SaaS.
-Deklarowane oceny użytkownika i kolejka powtórek pozostają.
+Historyczne oceny pozostają w bazie; aktywny interfejs nie wymaga oceniania
+ani nie pokazuje harmonogramu.
 **Aktualne zadania, statusy i instrukcję rozpoczęcia
 następnego wątku zawiera [plan projektu](docs/project-plan.md).**
 

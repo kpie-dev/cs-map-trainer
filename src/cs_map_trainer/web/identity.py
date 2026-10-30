@@ -3,7 +3,11 @@ from django.contrib.auth import get_user_model
 
 
 def verified_email(user):
-    return user.is_authenticated and EmailAddress.objects.filter(user=user, verified=True).exists()
+    return (
+        user.is_authenticated
+        and user.is_active
+        and EmailAddress.objects.filter(user=user, verified=True).exists()
+    )
 
 
 def lock_account(user):

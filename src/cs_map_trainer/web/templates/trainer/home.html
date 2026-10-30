@@ -2,12 +2,12 @@
 {% load static %}
 {% block content %}
 <section class="hero">
-  <div class="telemetry cyan">DE_MIRAGE / DE_DUST2 / DEMO → REPORT → PRACTICE</div>
+  <div class="telemetry cyan">DEMO → REPORT → PRACTICE</div>
   <h1>You lost <em>that duel.</em><br>Now <span class="cyan">practice it.</span></h1>
-  <p>Upload a Mirage or Dust2 demo. Find recurring lost duels and export their setups for practice in CS2 with Yprac.</p>
+  <p>Upload a CS2 demo from {{ supported_map_labels }}. Find recurring lost duels and export their setups for practice in CS2 with Yprac.</p>
 </section>
 <section class="panel uploader">
-  <div class="section-top"><span class="badge warning">PROTOTYPE · NOT VERIFIED IN GAME</span><span class="telemetry">CS2 ONLY / MIRAGE OR DUST2</span></div>
+  <div class="section-top"><span class="badge warning">PROTOTYPE · NOT VERIFIED IN GAME</span><span class="telemetry">CS2 ONLY</span></div>
   {% if not user.is_authenticated %}
     <div class="dropzone"><h2>Create your account first</h2><p>Verify your email to upload a demo. No Steam sign-in required.</p><a class="button primary" href="{% url 'account_signup' %}">Create account</a> <a class="button" href="{% url 'account_login' %}">Sign in</a></div>
   {% elif not email_verified %}
@@ -23,25 +23,26 @@
         <span class="upload-mark" aria-hidden="true">↑</span><h2>Drop your demo here</h2><p>or choose a file from your device</p>
         <label class="file-label" for="demo-file">Choose .dem file</label>
         <input id="demo-file" class="visually-hidden" type="file" accept=".dem" required aria-describedby="file-spec">
-        <p id="file-spec" class="telemetry">UNCOMPRESSED .DEM / DE_MIRAGE OR DE_DUST2 / UP TO 1 GiB</p>
+        <p id="file-spec" class="telemetry">UNCOMPRESSED .DEM / UP TO 1 GiB<br>{{ supported_map_names }}</p>
         <p id="file-name" aria-live="polite">No file selected.</p>
       </div>
       <label class="check"><input id="upload-rights" type="checkbox" required> I have permission to upload and analyze this demo.</label>
       <p class="muted">Your demo is stored privately and deleted after the first analysis attempt, even if it fails. Your report stays until you delete it.</p>
       <div class="actions"><button class="primary" id="upload-button" type="submit" disabled>Upload and analyze</button><a href="{% url 'history' %}">View analyses and active uploads</a></div>
       <progress id="upload-progress" value="0" max="100" hidden aria-label="Upload progress"></progress>
+      <div id="upload-stages" hidden>{% include "trainer/stages.html" %}</div>
       <p id="upload-feedback" role="status" aria-live="polite"></p>
       <noscript><p class="notice">JavaScript is required to upload a demo. You can still view your history and reports without it.</p></noscript>
     </form>
   {% endif %}
-  <div class="quota-strip"><span>Free: <strong>3 analyses per account per UTC calendar month</strong><br>Pro: <strong>$7.99/month / unlimited analyses on your account</strong></span><span class="cyan">{% if paid_plan %}Pro active / unlimited{% elif user.is_authenticated %}{{ quota_used }}/{{ quota_limit }} used{% else %}Verified email required{% endif %}</span></div>
+  <div class="quota-strip"><span>Free: <strong>{% if user.is_authenticated %}{{ quota_limit }}{% else %}3{% endif %} analyses per account per UTC calendar month</strong><br>Pro: <strong>$7.99/month / unlimited analyses on your account</strong></span><span class="cyan">{% if paid_plan %}Pro active / unlimited{% elif user.is_authenticated %}{{ quota_used }}/{{ quota_limit }} used{% else %}Verified email required{% endif %}</span></div>
   <p class="muted">Both plans: up to 1 GiB per file and one active upload or analysis per account. Changing SteamID does not reset your limit. <a href="{% url 'account' %}#billing">Plans and billing</a></p>
 </section>
 {% include "trainer/steam_id_guide.html" %}
 <section class="steps">
   <article class="panel"><span class="step-number">01</span><h2>Upload your demo</h2><p>Paste a player's SteamID64 and provide a demo you have permission to analyze. Your results stay private to your account.</p></article>
   <article class="panel"><span class="step-number cyan">02</span><h2>Choose your duels</h2><p>Check the sample size and limitations. Keep the scenarios you want to practice.</p></article>
-  <article class="panel"><span class="step-number green">03</span><h2>Practice and revisit</h2><p>Copy one complete duel setup. After practice, rate it to schedule your next review.</p></article>
+  <article class="panel"><span class="step-number green">03</span><h2>Download and practice</h2><p>Download your selected setups with one click. Open the correct map in Sandbox, run one setup and repeat it whenever you want.</p></article>
 </section>
 <section class="panel"><h2>What does a setup recreate?</h2><p>Static positions, aim angles and weapons for two players before a damage exchange. Movement, reactions and tactics are not replayed. A practice candidate is not proof of a mistake.</p><p class="warning">Yprac commands still need in-game verification. A valid report does not confirm map compatibility or a working import.</p></section>
 {% endblock %}

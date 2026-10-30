@@ -16,6 +16,7 @@ INSTALLED_APPS = [
     "allauth",
     "allauth.account",
     "allauth.socialaccount",
+    "allauth.mfa",
     "django_q",
     "cs_map_trainer.web.apps.TrainerConfig",
 ]
@@ -26,6 +27,7 @@ MIDDLEWARE = [
     "django.middleware.common.CommonMiddleware",
     "django.middleware.csrf.CsrfViewMiddleware",
     "django.contrib.auth.middleware.AuthenticationMiddleware",
+    "cs_map_trainer.web.middleware.AccountSessionMiddleware",
     "django.contrib.messages.middleware.MessageMiddleware",
     "allauth.account.middleware.AccountMiddleware",
     "cs_map_trainer.web.middleware.PrivateResponseMiddleware",
@@ -38,6 +40,12 @@ DATABASES = {
         "PASSWORD": os.environ.get("PGPASSWORD", ""),
         "HOST": os.environ.get("PGHOST", "127.0.0.1"),
         "PORT": os.environ.get("PGPORT", "5432"),
+    }
+}
+CACHES = {
+    "default": {
+        "BACKEND": "cs_map_trainer.web.auth_cache.SharedAuthenticationCache",
+        "LOCATION": "trainer_shared_cache",
     }
 }
 TEMPLATES = [
@@ -72,6 +80,22 @@ ACCOUNT_LOGIN_METHODS = {"email"}
 ACCOUNT_SIGNUP_FIELDS = ["email*", "password1*", "password2*"]
 ACCOUNT_EMAIL_VERIFICATION = "mandatory"
 ACCOUNT_UNIQUE_EMAIL = True
+ALLAUTH_TRUSTED_PROXY_COUNT = 1 if os.environ.get("DJANGO_TRUST_PROXY") == "1" else 0
+ALLAUTH_TRUSTED_CLIENT_IP_HEADER = None
+ACCOUNT_ADAPTER = "cs_map_trainer.web.adapters.SupportAccountAdapter"
+MFA_ADAPTER = "cs_map_trainer.web.adapters.EncryptedMFAAdapter"
+MFA_SUPPORTED_TYPES = ["totp", "recovery_codes"]
+MFA_ALLOW_UNVERIFIED_EMAIL = False
+MFA_TRUST_ENABLED = False
+MFA_RECOVERY_CODES_SHOW_ONCE = True
+MFA_TOTP_ISSUER = "CS Map Trainer"
+ACCOUNT_REAUTHENTICATION_TIMEOUT = 300
+SUPPORT_ADMIN_REAUTHENTICATION_TIMEOUT = 300
+ACCOUNT_RATE_LIMITS = {
+    "login": "30/m/ip",
+    "login_failed": "10/m/ip,5/5m/key",
+    "reauthenticate": "10/m/ip,5/5m/user",
+}
 SOCIALACCOUNT_AUTO_SIGNUP = False
 SOCIALACCOUNT_LOGIN_ON_GET = False
 SOCIALACCOUNT_EMAIL_AUTHENTICATION = False

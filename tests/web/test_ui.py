@@ -21,12 +21,24 @@ from django.utils.translation import override
 
 from cs_map_trainer.analysis import BASE_LIMITATIONS
 from cs_map_trainer.exporting import export_scenario
-from cs_map_trainer.maps import map_label
+from cs_map_trainer.maps import SUPPORTED_MAP_LABELS, SUPPORTED_MAP_NAMES, map_label
 from cs_map_trainer.web import practice, services
 from cs_map_trainer.web.models import PracticeReview, Upload
-from cs_map_trainer.web.presentation import LIMITATIONS
+from cs_map_trainer.web.presentation import LIMITATIONS, error_message
+from cs_map_trainer.web.templatetags.trainer_labels import limitation_short
 
 pytestmark = pytest.mark.django_db
+
+
+def test_supported_maps_are_shared_by_upload_history_and_error(api):
+    for path in ("/", reverse("history")):
+        response = api.get(path)
+        assert response.status_code == 200
+        text = response.content.decode()
+        assert SUPPORTED_MAP_LABELS in text
+        assert "Mirage or Dust2" not in text
+    assert SUPPORTED_MAP_NAMES in api.get("/").content.decode()
+    assert SUPPORTED_MAP_LABELS in error_message("unsupported_or_invalid_demo")
 
 
 @pytest.fixture
@@ -130,14 +142,15 @@ def test_signup_and_confirmation_email_are_english(client):
 
 
 def test_english_copy_ignores_explicit_translation_override(api, completed_upload):
-    review = rate(completed_upload, "hard")
+    rate(completed_upload, "hard")
     current = completed_upload.report["scenario_document"]["scenarios"][0]
     with override("pl"):
         response = api.get(reverse("training", args=[completed_upload.pk]))
     text = response.content.decode()
     assert '<html lang="en">' in text
-    assert "Rate your practice" in text
-    assert f"Rated: {date_format(review.reviewed_at, 'j M Y, H:i')} UTC" in text
+    assert "Copy CS2 commands" in text
+    assert "Rate your practice" not in text
+    assert "Rated:" not in text
     assert f"XYZ {current['player']['position']['x']:.2f} /" in text
     assert "PLAYER /" in text
     assert "Bot player index 2 after removing existing bots is assumed, not verified." in text
@@ -162,7 +175,12 @@ def test_saved_ratings_use_english_labels(api, completed_upload, rating, label):
     review = rate(completed_upload, rating)
     assert review.get_rating_display() == label
     response = api.get(reverse("training", args=[completed_upload.pk]))
-    assert f'<p class="badge">{label}</p>' in response.content.decode()
+    assert f'<p class="badge">{label}</p>' not in response.content.decode()
+    assert completed_upload.practice_reviews.get().pk == review.pk
+    library = api.get("/practice/")
+    assert library.context["page"].paginator.count == 1
+    assert library.context["page"][0]["group"]["selected_count"] == 2
+    assert "Next review:" not in library.content.decode()
 
 
 def test_known_limitations_and_exclusions_have_readable_labels(api, completed_upload):
@@ -173,7 +191,7 @@ def test_known_limitations_and_exclusions_have_readable_labels(api, completed_up
     text = api.get(reverse("report", args=[completed_upload.pk])).content.decode()
     assert "Small samples do not establish player skill." in text
     assert "Damage exchange involved additional players" in text
-    assert "(multi_party_damage)" in text
+    assert "Excluded losses" in text
     assert "Missing opponent aim angles are estimated toward the player" in text
 
 
@@ -204,8 +222,9 @@ def test_home_has_rights_csrf_and_actual_quota(api, upload):
     assert b'id="upload-rights"' in response.content
     assert b"csrfmiddlewaretoken" in response.content
     assert b"1/3" in response.content
-    assert b"CS2 ONLY / MIRAGE OR DUST2" in response.content
-    assert b"DE_MIRAGE OR DE_DUST2 / UP TO 1 GiB" in response.content
+    assert b"CS2 ONLY" in response.content
+    assert SUPPORTED_MAP_NAMES in response.content.decode()
+    assert b"UNCOMPRESSED .DEM / UP TO 1 GiB" in response.content
     assert "no-store" in response["Cache-Control"]
     response = api.get(f"/uploads/{upload.pk}/")
     assert (
@@ -251,7 +270,7 @@ def test_report_and_training_use_real_data_and_exporter(api, completed_upload):
     response = api.get(reverse("report", args=[upload.pk]))
     assert response.status_code == 200
     text = response.content.decode()
-    assert "practice candidates, not proof of mistakes" in text
+    assert "practice priorities, not proof of mistakes" in text
     assert "opponent_aim_inferred_toward_player" in text
     assert scenario_id(upload) in text
     assert "NOT VERIFIED IN GAME" in text
@@ -263,13 +282,13 @@ def test_report_and_training_use_real_data_and_exporter(api, completed_upload):
     document = services.training_result(upload.owner, upload.pk)[1]
     expected = export_scenario(document.scenarios[0]).console_line
     assert expected in unescape(response.content.decode())
-    assert b"rating" in response.content
+    assert b'name="rating"' not in response.content
     assert b"?scenario=second-scenario" in response.content
     assert b"?format=cfg" in response.content
     assert f"{map_label(map_name).upper()} / SANDBOX" in response.content.decode()
     assert f"({map_name})" in response.content.decode()
     response = api.get(reverse("practice"))
-    assert f"{map_name.upper()} / ROUND" in response.content.decode()
+    assert f"{map_name.upper()} / " in response.content.decode()
 
 
 def test_report_shows_both_native_locations_for_saved_scenarios(api, completed_upload):
@@ -298,19 +317,20 @@ def test_report_shows_both_native_locations_for_saved_scenarios(api, completed_u
         response = api.get(reverse("report", args=[upload.pk]))
     assert response.status_code == 200
     text = response.content.decode()
-    cards = text.split('<article class="situation">')[1:]
+    cards = text.split('<article class="situation"')[1:]
     first_visible = cards[0].split("<details>", 1)[0]
-    second_visible = cards[1].split("<details>", 1)[0]
-    assert "Victim: T Spawn" in first_visible
-    assert "Killer: CT Spawn" in first_visible
-    assert "Victim: CT Spawn" in second_visible
-    assert "Killer: T Spawn" in second_visible
-    assert "Locations at scenario snapshot" in first_visible
+    assert len(cards) == 1
+    assert 'class="amber">T Spawn' in first_visible
+    assert 'class="cyan">CT Spawn' in first_visible
+    assert 'class="amber">CT Spawn' in cards[0]
+    assert 'class="cyan">T Spawn' in cards[0]
+    assert 'class="matchup"' in first_visible
+    assert "Partial legacy selection: 1 / 2 retained" in first_visible
     assert "last named areas reported by the game" in text
     assert "not guessed from coordinates" in text
     assert "before the first damage, not the moment of death" in text
     assert "LOCATION SOURCE m_szLastPlaceName / TICK 100" in text
-    assert "VICTIM TSpawn / KILLER CTSpawn" in text
+    assert "PLAYER TSpawn / OPPONENT CTSpawn" in text
     assert "Location data was not recorded" not in text
     assert "Unknown location" not in text
     assert response.context["selected_count"] == 1
@@ -333,14 +353,14 @@ def test_report_handles_missing_callouts_per_participant(api, completed_upload, 
     Upload.objects.filter(pk=completed_upload.pk).update(report=report)
     response = api.get(reverse("report", args=[completed_upload.pk]))
     assert response.status_code == 200
-    card = response.content.decode().split('<article class="situation">', 1)[1]
+    card = response.content.decode().split('<article class="situation"', 1)[1]
     visible, details = card.split("<details>", 1)
     victim_name = "Location unavailable in demo" if missing in {"victim", "both"} else "T Spawn"
     killer_name = "Location unavailable in demo" if missing in {"killer", "both"} else "T Spawn"
-    assert f"Victim: {victim_name}" in visible
-    assert f"Killer: {killer_name}" in visible
+    assert f'class="amber">{victim_name}' in visible
+    assert f'class="cyan">{killer_name}' in visible
     assert "XYZ " in details
-    assert 'name="choice_' in visible
+    assert 'type="checkbox" name="group"' in visible
     assert "Location data was not recorded" not in response.content.decode()
 
 
@@ -355,12 +375,12 @@ def test_legacy_report_does_not_guess_locations_from_coordinates(api, completed_
     response = api.get(reverse("report", args=[completed_upload.pk]))
     assert response.status_code == 200
     text = response.content.decode()
-    assert "Victim: Not recorded in this report" in text
-    assert "Killer: Not recorded in this report" in text
+    assert 'class="amber">Not recorded in this report' in text
+    assert 'class="cyan">Not recorded in this report' in text
     assert "Upload the demo again to include it" in text
-    assert "Victim: T Spawn" not in text
+    assert 'class="amber">T Spawn' not in text
     assert "Location unavailable in demo" not in text
-    assert 'name="choice_' in text
+    assert 'type="checkbox" name="group"' in text
 
 
 def test_native_location_values_are_escaped_in_labels_and_details(api, completed_upload):
@@ -379,7 +399,7 @@ def test_native_location_values_are_escaped_in_labels_and_details(api, completed
     text = response.content.decode()
     assert "<script>alert(1)</script>" not in text
     assert "&lt;script&gt;alert(1)&lt;/script&gt;" in text
-    assert "Killer: Future Place" in text
+    assert 'class="cyan">Future Place' in text
 
 
 def test_invalid_saved_location_tick_fails_explicitly(api, completed_upload):
@@ -481,13 +501,13 @@ def test_report_prioritizes_selection_and_keeps_raw_data_in_closed_details(api, 
     text = response.content.decode()
     assert "Recurring duel setups" not in text
     assert "No comparable groups found." in text
-    cards = text.split('<article class="situation">')[1:]
-    assert len(cards) == 2
+    cards = text.split('<article class="situation"')[1:]
+    assert len(cards) == 1
     for card in cards:
         visible, details = card.split("<details>", 1)
         details = details.split("</details>", 1)[0]
-        assert "<h3>Round " in visible
-        assert 'name="choice_' in visible
+        assert "<strong>2 scenarios" in visible
+        assert 'type="checkbox" name="group"' in visible
         assert "SCENARIO " not in visible
         assert "SNAPSHOT " not in visible
         assert "XYZ " not in visible
@@ -499,8 +519,8 @@ def test_report_prioritizes_selection_and_keeps_raw_data_in_closed_details(api, 
         assert "PITCH " in details
         assert " / YAW " in details
         assert " / ROLL " in details
-    assert "<details><summary>All reconstruction limits</summary>" in text
-    assert "<details><summary>Excluded events</summary>" in text
+    assert '<details class="report-technical"><summary>Technical analysis details</summary>' in text
+    assert "Limitations and exclusions" not in text
     assert "Location unavailable" not in text
 
 
@@ -517,26 +537,28 @@ def test_report_lists_shared_limits_once_and_keeps_scenario_warnings_visible(api
     Upload.objects.filter(pk=completed_upload.pk).update(report=report)
     response = api.get(reverse("report", args=[completed_upload.pk]))
     text = unescape(response.content.decode())
-    cards = text.split('<article class="situation">')[1:]
+    cards = text.split('<article class="situation"')[1:]
     for card in cards:
         card = card.split("</article>", 1)[0]
         for code in BASE_LIMITATIONS:
             assert code not in card
             assert LIMITATIONS[code] not in card
             assert text.count(LIMITATIONS[code]) == 1
-    first_visible, first_details = cards[0].split("<details>", 1)
+    warning_card = next(card for card in cards if "player_blinded" in card)
+    other_card = next(card for card in cards if "player_blinded" not in card)
+    first_visible, first_details = warning_card.split("<details>", 1)
     for code in ("opponent_aim_inferred_toward_player", "player_blinded"):
-        assert LIMITATIONS[code] in first_visible
+        assert limitation_short(code) in first_visible
         assert code not in first_visible
         assert code in first_details
-        assert LIMITATIONS[code] not in cards[1]
-    assert 'class="warning"' not in cards[1].split("</article>", 1)[0]
+        assert LIMITATIONS[code] not in other_card.split("</article>", 1)[0]
+    assert 'class="scenario-warnings warning"' not in other_card.split("</article>", 1)[0]
 
 
 def test_report_preserves_shared_limits_missing_from_report_metadata(api, completed_upload):
     response = api.get(reverse("report", args=[completed_upload.pk]))
     text = response.content.decode()
-    shared = text.split("<summary>All reconstruction limits</summary>", 1)[1]
+    shared = text.split("<summary>Technical analysis details</summary>", 1)[1]
     shared = shared.split("</details>", 1)[0]
     assert "map_geometry_unverified" in shared
     assert LIMITATIONS["map_geometry_unverified"] in shared
@@ -753,8 +775,10 @@ def test_review_form_redirect_and_read_only_get(api, completed_upload):
     assert response.url == "/practice/"
     assert api.get(review_url(completed_upload)).status_code == 405
     assert b"hard" not in api.get("/practice/?filter=upcoming").content
-    assert "Hard" in api.get("/practice/?filter=upcoming").content.decode()
-    assert api.get("/practice/?filter=unknown").status_code == 400
+    assert ">Hard<" not in api.get("/practice/?filter=upcoming").content.decode()
+    assert api.get("/practice/?filter=unknown").status_code == 200
+    assert api.get("/practice/").context["page"].paginator.count == 1
+    assert completed_upload.practice_reviews.get().rating == "hard"
 
 
 @pytest.mark.parametrize(
@@ -902,9 +926,10 @@ def test_history_and_queue_include_older_than_100_reports(api, completed_upload)
     response = api.get("/history/")
     assert response.context["page"].paginator.count == 103
     response = api.get("/practice/")
-    assert response.context["page"].paginator.count == 206
+    assert response.context["page"].paginator.count == 103
     assert len(response.context["page"]) == 20
     entries = practice.practice_queue(upload.owner, "due")
     assert entries[0]["upload"].pk == upload.pk
     response = api.get("/practice/?page=2&filter=due")
-    assert b"filter=due" in response.content
+    assert b"filter=due" not in response.content
+    assert response.context["page"].number == 2

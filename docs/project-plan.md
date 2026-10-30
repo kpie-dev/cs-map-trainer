@@ -1,5 +1,52 @@
 # CS2: od przegranego pojedynku do własnego treningu
 
+## Panel obsługi kont
+
+Panel `/admin/` opiera się na ograniczonym Django Admin, MFA allauth i rolach
+Support/Account Operators. Konto e-mail pozostaje podstawą limitów i rozliczeń;
+nieweryfikowany SteamID służy do wyszukiwania kont po uploadach, nie ich łączenia.
+Zakres: podgląd konta/zużycia/snapshotu Stripe, indywidualny stały limit miesięczny,
+czasowe ręczne Pro, blokady, link resetu hasła i ponowna weryfikacja e-maila.
+Ręczny dostęp nie zmienia danych płatności, blokada nie anuluje subskrypcji.
+Finanse pozostają obsługiwane w Stripe, bez refundacji lub edycji subskrypcji z panelu.
+Dedykowane akcje wymagają uprawnień, potwierdzenia, uzasadnienia i audytu;
+brak edytora haseł, uprawnień lub ręcznej weryfikacji adresów dla obsługi.
+Konfiguracja i ograniczenia: sekcja „Panel obsługi kont” w README.
+Odbiór rzeczywistej poczty, Stripe i konfiguracji wdrożeniowej pozostaje osobną bramką.
+
+## Aktualizacja: treningi grupowe i uproszczony interfejs
+
+Aktualny przepływ to **demo → jeden bieżący etap → wybór grup → ZIP z CFG
+jednym kliknięciem → trening wszystkich wybranych członków grupy**.
+Kod i lokalny odbiór Mirage/Dust2 są gotowe. To zastępuje wcześniejszy model
+osobnego wyboru każdej sytuacji oraz ocen i harmonogramu powtórek.
+Historyczne oceny pozostają zachowane; nie są aktywną funkcją ani kryterium G3.
+
+- Loader: spinner i jeden aktualny etap, polling 2,5 s, deadline 10 minut;
+  przycisk retry tylko po błędzie/przerwie. Bez fikcyjnych procentów analizy.
+- Jeden checkbox wybiera całą grupę podobnych pojedynków. Grupowanie wymaga
+  zgodności kontekstu i każdej pary pozycji/kątów; wspólny callout nie wystarcza.
+  Trening ma nawigację grup i wszystkich ich członków, nie tylko reprezentanta.
+- Kolejność treningów: rifle/sniper vs pistol/SMG → rifle/sniper obu stron →
+  inne/nieznane zestawy → własny pistol/SMG. To priorytet klas broni, nie
+  pomiar ekonomii, umiejętności ani zmiana rankingu statystycznego analizy.
+- Opis `CT / awp / lokacja → T / tec9 / lokacja`, wyróżnione lokacje,
+  komendy w pierwszym widoku. Szczegóły techniczne zamknięte, ważne
+  ostrzeżenia widoczne. UI pozostaje angielskie.
+- Jedna akcja POST zapisuje wybór i buduje odpowiadający mu ZIP z CFG/TXT,
+  również bez JS. `training-groups.json` dodaje członkostwo bez zmiany
+  manifestu v1. Historyczny częściowy wybór nie jest po cichu rozszerzany.
+
+Wspólna logika: `training_groups.py`, `web/grouping.py`, `packs.py`
+i istniejące usługi. Bez zmiany parsera, limitu zachowanych kandydatów,
+modelu ocen lub statusu `unverified_in_game`.
+Ostatni odbiór: 572 testy zmienionych obszarów, lint/format, brak migracji
+oraz Playwright/Chromium na obu mapach i rozmiarach 1440 × 900 / 390 × 900.
+Kontenery aplikacji przebudowano; HTTP 200 i aktualne statyki potwierdzono.
+Szczegóły i granice dowodów: [protokół odbioru](integration-validation.md#aktualny-odbiór-ścieżki-upload--wybór--trening).
+Nadal pozostają: dodatkowe mapy, docelowe wdrożenie i rzeczywiste usługi,
+techniczne E2E oraz końcowy odbiór gry. Nie oznaczać ich jako zakończonych.
+
 ## Aktualizacja: konta bez weryfikacji Steam
 
 Aktualny kontrakt zastępuje poniższe wcześniejsze ustalenia o Steam OpenID
@@ -41,14 +88,15 @@ Docelową grą pozostaje CS2, nie starsze CS:GO.
 
 **Rozszerzenie zatwierdzonego zakresu map:** Cache, Dust2, Mirage, Inferno,
 Nuke, Ancient i Anubis. Zastępuje wcześniejsze ograniczenie produktu do jednej
-mapy. Zrealizowany etap obejmuje Mirage i Dust2 w parserze, analizie,
-eksporterze, paczkach oraz aplikacji. Pozostałe pięć map wymaga implementacji.
+mapy. Kod obejmuje wszystkie siedem map w parserze, analizie,
+eksporterze, paczkach oraz aplikacji. Rzeczywiste dema Cache/Inferno/Nuke/Ancient/Anubis
+nadal wymagają osobnego odbioru parsera i workera; regresja syntetyczna nie jest tym dowodem.
 Jedyną integracją pozostaje Yprac, a zgodność w grze wymaga osobnego odbioru
 każdej mapy. Lista jest jawna i nie zmienia się automatycznie z rotacją turniejową.
 
 Stan implementacji: pakiet Python, kontrakt scenariuszy v1, walidator i CLI
-`players`/`analyze`/`benchmark` z przypiętym Awpy 3.1.1. Czytamy dema CS2 Mirage i Dust2
-i generujemy raport JSON v2 z migawkami sprzed wymiany obrażeń, grupowaniem oraz
+`players`/`analyze`/`benchmark` z przypiętym Awpy 3.1.1. Czytamy dema CS2 siedmiu map
+i generujemy raport JSON v3 (z zachowaniem odczytu v2) z migawkami sprzed wymiany obrażeń, grupowaniem oraz
 wykluczeniami. Grupy rozdzielają liczbę porażek od win rate w porównywalnych,
 przefiltrowanych wygranych i przegranych starciach. Dokument scenariuszy nadal ma v1.
 Reguły `damage-window-v3` zachowują dostępne kąty przeciwnika, a brakujący
@@ -65,8 +113,8 @@ i sprzątanie. Backend treningowy zapisuje wybór i odrzucenia przy raporcie,
 udostępnia prywatny eksport jednej linii komend/CFG i opcjonalny ZIP na żądanie.
 Nie parsuje ponownie dema ani nie zapisuje ZIP w R2.
 UI Tactical HUD na szablonach Django obejmuje konto/Steam, upload i statusy,
-prywatną historię, raport, wybór i kopiowanie komend. Są deklarowane oceny
-i stronicowana kolejka powtórek; nie ma telemetrii z gry.
+prywatną historię, raport, wybór grup i kopiowanie komend. Biblioteka treningów
+grupowych zastąpiła oceny i harmonogram; nie ma telemetrii z gry.
 Rzeczywiste integracje R2/Steam/SMTP wymagają odbioru.
 Konfiguracja wdrożeniowa Caddy/HTTPS/statyków jest przygotowana w
 `compose.production.yml`, z lokalnym odbiorem Compose i testowym CA.
@@ -111,8 +159,8 @@ do nowej sesji: [implementation-todos.md](implementation-todos.md).
 
 Ten plik jest źródłem prawdy do kontynuacji, niezależnym od historii rozmowy
 i sesyjnej bazy zadań. Nie zaczynać implementacji od nowa: kod backendu treningowego
-jest gotowy na istniejącym parserze i kontrakcie; UI i osobiste powtórki
-także są już zaimplementowane.
+jest gotowy na istniejącym parserze i kontrakcie; UI i treningi grupowe
+także są już zaimplementowane. Nie przywracać ocen ani harmonogramu.
 
 ### Gotowe
 
@@ -123,7 +171,7 @@ także są już zaimplementowane.
 | CLI | `players`, `analyze`, `benchmark`, `validate-scenarios`, `schema`; JSON na stdout lub do nowego pliku bez nadpisywania | `cli.py` |
 | Eksport prototypowy Yprac | `export-scenario`: jedna linia lub opcjonalny CFG; walidacja mapy/broni/liczb, stałe komendy; indeksy gracza i encji `2` jako osobne założenia, orientacja przez `point_teleport`, status `unverified_in_game` | `exporting.py`, `cli.py` |
 | Paczki treningowe | `build-pack`: wybór/odrzucanie po ID, ZIP z manifestem, scenariuszami, instrukcją, osobnymi TXT i opcjonalnym CFG; raport v2/v3 lub dokument v1, zapis bez nadpisywania | `packs.py`, `artifacts.py`, `cli.py` |
-| Parser | Nieskompresowane CS2 `.dem` do 1 GiB, `de_mirage` i `de_dust2`; skład, rundy, zgony, obrażenia i zbiorcze migawki; hash wejścia i jawne błędy | `parsing.py`, `maps.py` |
+| Parser | Nieskompresowane CS2 `.dem` do 1 GiB, siedem map z `maps.py`; skład, rundy, zgony, obrażenia i zbiorcze migawki; hash wejścia i jawne błędy | `parsing.py`, `maps.py` |
 | Analiza | Wspólny tick sprzed obrażeń, pozycje i dostępne kąty obu stron; brakujący pitch/yaw przeciwnika przybliżany kierunkiem ku graczowi z jawnym oznaczeniem; wykluczenia i grupowanie z kontekstem | `analysis.py` |
 | Statystyki | Raport `analysis_version: 3` z odczytem starszych v2; porównywalne wygrane i przegrane, liczebność próby, win rate tylko w przefiltrowanych rozstrzygniętych starciach; ranking według liczby porażek | `analysis.py` |
 | Nazwy lokacji | Awpy `m_szLastPlaceName` dla obu uczestników w dokładnym ticku scenariusza, zapis w raporcie v3, czytelne etykiety w UI; bez heurystycznych obszarów XYZ; starsze raporty wymagają ponownego przesłania demka | `parsing.py`, `analysis.py`, `callouts.py`, `web/pages.py` |
@@ -133,7 +181,7 @@ także są już zaimplementowane.
 | Minimalny backend | Django/PostgreSQL, e-mail + Steam OpenID, prywatny multipart R2, Free 3 analizy/miesiąc UTC na SteamID, Q2, jednorazowy worker i prywatne wyniki/skrypty | `web/`, `tests/web/` |
 | Backend treningowy | Zapamiętany wybór/odrzucenia, prywatna linia komend i opcjonalny CFG oraz ZIP na żądanie z raportu, bez R2 i ponownego parsowania; migracja `0003_training_selection` | `web/models.py`, `web/services.py`, `web/views.py`, `tests/web/test_training.py` |
 | UI treningowe | Responsywne Tactical HUD według `design/`: strona główna/upload, allauth, konto/Steam, historia/status, raport z ograniczeniami, wybór, kopiowanie i opcjonalne pobrania | `web/pages.py`, `web/presentation.py`, `web/templates/`, `web/static/` |
-| Osobiste powtórki | Deklarowane oceny i terminy 1/3/7 dni, wyłączenie nietrafnych do przywrócenia, prywatna kolejka respektująca wybór i usuwanie; migracja `0004_practicereview` | `web/practice.py`, `web/models.py`, `tests/web/test_ui.py` |
+| Treningi grupowe | Wspólna logika podobieństwa i priorytetu broni; wybór grup, wszyscy członkowie, nawigacja i biblioteka bez duplikatów, ZIP z członkostwem; historyczne oceny zachowane bez UI | `training_groups.py`, `web/grouping.py`, `web/practice.py`, `packs.py` |
 | Abonament Stripe | Checkout/portal, podpisane i idempotentne webhooki, uzgodnienie opłaconego okresu, Pro 7,99 USD/mies. bez limitu analiz własnego SteamID, anulowanie przed usunięciem konta; migracja `0005_billing_accounts`; prawdziwy Stripe do odbioru | `web/billing.py`, `web/billing_views.py`, `tests/web/test_billing.py` |
 | Usuwanie wejść | Po pierwszej próbie, także błędnej; osobny reaper i ponawianie usuwania, wygaśnięcie porzuconych wejść, usuwanie historii/konta | `web/tasks.py`, `web/services.py` |
 
@@ -184,7 +232,7 @@ i paczki są implementacją prototypową na
 zaakceptowanych założeniach, nie dowodem integracji. Minimalny backend ma już
 konta, upload, bazę, kolejkę, izolowany proces parsera i prywatną historię.
 Jest zapamiętany wybór sytuacji i autoryzowany eksport przez backend WWW.
-UI, deklarowane oceny i prosta kolejka powtórek są gotowe w kodzie i lokalnym
+UI i grupowe treningi bez ocen/harmonogramu są gotowe w kodzie i lokalnym
 odbiorze. Moduł płatności Stripe jest zaimplementowany, ale prawdziwe Stripe
 i pełne wdrożenie TLS/backup/monitoring wymagają konfiguracji i odbioru.
 Prawdziwe R2/Steam/SMTP oraz obraz
@@ -231,7 +279,7 @@ pozostałych etapów są w sekcji „Todos i zależności”.
 Zakres produktu: użytkownik przesyła demo swojego powiązanego gracza i otrzymuje
 trening odtwarzający ustawienia przegranych pojedynków. Nie budujemy procesu
 oceny przez trenerów, pilota biznesowego ani automatycznego wykrywania wszystkich
-błędów. Deklarowane oceny użytkownika i kolejka powtórek pozostają.
+błędów. Oceny i harmonogram usunięto z UI; historyczne dane pozostają.
 
 Zgodnie z decyzją właściciela najpierw powstają backend i UI, przy założeniu
 poprawności komend, a próby importu do Yprac Hub/Sandbox odbywają się na końcu.
@@ -286,7 +334,7 @@ wybranym stosem. Techniczne próby aplikacji i Yprac nie są pilotem biznesowym.
 ## Granice produktu
 
 Rdzeń to demo → kandydaci → wygenerowany trening. Raport nie jest werdyktem
-o błędzie; ocena po ćwiczeniu jest deklaracją użytkownika, nie telemetrią z gry.
+o błędzie; nie ma ocen po ćwiczeniu ani telemetrii z gry.
 Nie dodajemy programu trenerskiego, badań skuteczności, metryk powrotów ani
 bramek walidacji biznesowej. Pozostają testy technicznej poprawności parsera,
 aplikacji, płatności i komend w Yprac oraz pomiary zasobów potrzebne do utrzymania.
@@ -336,25 +384,21 @@ konsoli CS2 na interfejs Yprac bez sprawdzenia jego możliwości.
 Nie przepisywać selekcji, eksportera ani prywatnych operacji. Przed uruchomieniem
 na istniejącej bazie zastosować wszystkie migracje, w tym `0005_billing_accounts`.
 
-Zaimplementowano szablony Django i lokalne CSS/JS, bez HTMX: konto/Steam, prywatna historia,
-upload z potwierdzeniem uprawnień i błędy wejścia, status zadania,
-raport z ograniczeniami i przybliżonymi kątami, wybór/odrzucanie
-sytuacji z zachowaniem wyboru oraz przycisk kopiowania pełnego ustawienia scenariusza.
-ZIP i CFG są opcjonalnymi pobraniami, nie wymaganym krokiem treningu.
-Jeden scenariusz aktywny naraz; bez ręcznego indeksu bota i przepisywania
-wielu komend. UI pokryto testami przepływu, uprawnień, CSRF i błędów.
-Zrealizowano również `wire-personal-training`: `PracticeReview` przechowuje jedną
-bieżącą deklarację na sytuację. Trudne wyznacza powtórkę za 1 dzień, wykonane
-za 3 dni, łatwe za 7 dni; nietrafne wyłącza sytuację do ręcznego przywrócenia.
-Terminy liczone są od chwili oceny po stronie serwera. Brak oceny oznacza nową
-sytuację. Zmiana wyboru nie kasuje ocen; kolejka uwzględnia aktualny wybór
-ze wszystkich gotowych prywatnych raportów i stronicuje wynik. Usuwanie
-raportu/konta usuwa oceny, także przy równoległym zapisie.
+Zaimplementowano szablony Django i lokalne CSS/JS, bez HTMX: konto e-mail,
+prywatna historia, upload z potwierdzeniem uprawnień i SteamID gracza,
+loader jednego etapu, wybór grup oraz zapis i ZIP z CFG jednym POST.
+Alternatywnie Open practice zapisuje wybór i otwiera komendy. Jeden scenariusz
+aktywny naraz, z nawigacją grup/członków; bez ręcznego indeksu bota.
+UI pokryto testami przepływu, uprawnień, CSRF i błędów.
+`wire-personal-training` obejmuje obecnie bibliotekę grup wszystkich gotowych
+prywatnych raportów według wyboru, bez ocen i harmonogramu.
+Historyczne `PracticeReview` zachowano, ale nie filtrują biblioteki.
+Usuwanie raportu/konta usuwa również te dane.
 
 Wygląd oparto na `design/`, bez demonstracyjnych wyników, obietnic diagnozy
 błędów, automatycznych wyników treningu i radaru bez potwierdzonego podkładu.
-Przeglądarkowy odbiór syntetyczny potwierdza formularze, wybór, pełną linię,
-schowek i odmowę dostępu, deklaracje/przywrócenie, mobilny układ oraz PUT i retry
+Przeglądarkowy odbiór syntetyczny potwierdza formularze, wybór grup, pełną linię,
+schowek i odmowę dostępu, częściowe wybory, mobilny układ oraz PUT i retry
 transportu z tym samym UUID. Nie zastępuje próby prawdziwych R2/Steam/SMTP.
 Statyki są pakowane w wheel i zbierane w obrazie; produkcyjny proxy musi je podać.
 Do odbioru w grze UI i manifest wskazują „niezweryfikowane w grze”.
@@ -365,7 +409,7 @@ G3 oznacza gotowość aplikacji do końcowych prób, nie decyzję biznesową.
 Po ukończeniu backendu i UI wykonać poniższą procedurę. Brak testera odracza
 odbiór w grze, ale nie blokuje wcześniejszej implementacji.
 
-1. Zacząć od wskazanego Hub `3070715607`. Dla każdej z siedmiu map ustalić konkretną wspieraną wersję i tryb Sandbox, wymagany klient oraz dostęp. Obecny parser obsługuje `de_mirage` i `de_dust2`; pozostałe mapy wymagają implementacji. Zgodność każdej docelowej mapy pozostaje do odbioru.
+1. Zacząć od wskazanego Hub `3070715607`. Dla każdej z siedmiu map ustalić konkretną wspieraną wersję i tryb Sandbox, wymagany klient oraz dostęp. Parser i prototyp eksportera obejmują siedem map; nie potwierdza to ich dostępności w Yprac. Zgodność każdej docelowej mapy pozostaje do odbioru.
 2. Na ręcznie przygotowanej sytuacji sprawdzić: ustawienie XYZ i kąta gracza, ustawienie XYZ i kąta jednego bota, broń, restart i ponowne wykonanie ćwiczenia.
 3. Ustalić rzeczywisty mechanizm importu: natywny format scenariusza, oficjalny interfejs albo komendy dostępne w wybranym trybie. W razie braku dokumentacji zapytać autora Yprac o wspierany import i zgodę na integrację.
 4. Jeżeli proponowany mechanizm to `.cfg`, wykonać próbę od czystej instalacji użytkownika: kopiowanie paczki, wejście do właściwego trybu i `exec`. Samo wygenerowanie syntaktycznie poprawnego pliku nie jest dowodem działania.
@@ -387,14 +431,13 @@ Jeżeli żaden tani mechanizm nie spełnia wymogu automatycznego ustawiania, jaw
 
 ## MVP: dokładny przepływ i granice
 
-1. Użytkownik potwierdza e-mail, łączy Steam OpenID i przesyła uprawnione `.dem`.
-   Analiza dotyczy tylko powiązanego SteamID, którego obecność sprawdzamy w demie.
-   Wybór innego zawodnika i pakiet trenera są poza zakresem.
+1. Użytkownik potwierdza e-mail, wskazuje SteamID64 gracza i przesyła uprawnione `.dem`.
+   Obecność gracza sprawdzamy w demie; nie ma powiązywania ani logowania Steam.
 2. System wybiera bezpośrednie przegrane pojedynki i pokazuje dowody: mapa, runda, uczestnicy, pozycje, broń oraz kontekst zdarzenia.
-3. Powtarzające się podobne sytuacje tworzą małe grupy. Ranking rozdziela częstość od skuteczności i wskazuje rozmiar próby.
-4. Użytkownik dostaje małą paczkę scenariuszy: jego punkt startu i bot w pozycji przeciwnika z tej samej chwili. Opcjonalnie dobierany jest gotowy drill dla mierzalnego problemu.
-5. Paczka trafia do jednej sprawdzonej integracji. Pobranie zawiera instrukcję uruchomienia i informacje o wspieranej mapie, wersji i wymaganiach.
-6. Gracz wykonuje scenariusze i może oznaczyć je jako wykonane, łatwe, trudne lub nietrafne. Na tej podstawie powstaje prosta kolejka powtórek.
+3. Podobne sytuacje tworzą grupy treningowe wszystkich członków. Priorytet klas broni jest odrębny od statystyk częstości i skuteczności w raporcie.
+4. Użytkownik wybiera grupy i jednym POST zapisuje wybór oraz pobiera ZIP z CFG/TXT i członkostwem, bez ponownego parsowania.
+5. Paczka zawiera instrukcję mapy/Sandbox, wersji i wymagań prototypu Yprac; integracja nie jest jeszcze potwierdzona w grze.
+6. Gracz przełącza grupy i ich członków oraz powtarza pojedynczy setup komendą/CFG. Bez ocen i harmonogramu; historyczne dane zachowane.
 
 Bez integracji zwrotnej wykonanie i trudność są deklaracją użytkownika, nie automatycznie zmierzonym wynikiem. Nie obiecywać pomiaru poprawy celowania z samego pobrania `.cfg`.
 
@@ -568,7 +611,7 @@ Zakres `build-subscriptions`:
   webhook wymagają konfiguracji i osobnego odbioru, zgodnie z README.
 
 Nie ma etapu oceny przez trenera, badania powrotów użytkowników, płatnego pilota
-ani decyzji `approve-saas`. Deklarowane oceny użytkownika i powtórki zostają.
+ani decyzji `approve-saas`. Aktywne UI nie obejmuje ocen ani harmonogramu.
 
 ## Minimalna eksploatacja, dane i uprawnienia
 
@@ -586,11 +629,21 @@ ani decyzji `approve-saas`. Deklarowane oceny użytkownika i powtórki zostają.
 
 ### Rozszerzenie: siedem map turniejowych
 
-Status: **częściowo zaimplementowane: Mirage i Dust2**. Wspólny katalog
+Status: **obsługa aplikacyjna siedmiu map zaimplementowana**. Wspólny katalog
 `maps.py` jest używany przez parser, eksporter, paczki i prezentację map.
-Reguły `damage-window-v3`, raport v2 i scenariusze v1 pozostają bez zmian.
-Eksport Dust2 jest eksperymentalny i `unverified_in_game`; nie zamyka G1/G4.
-Zakończono lokalny odbiór Playwright obu map na syntetycznych raportach:
+Reguły `damage-window-v3`, raport v3 (odczyt v2) i scenariusze v1 pozostają bez zmian.
+Eksport wszystkich map jest eksperymentalny i `unverified_in_game`; nie zamyka G1/G4.
+Brakuje uprawnionych lokalnych dem Cache/Inferno/Nuke/Ancient/Anubis do osobnego
+odbioru rzeczywistego parsera/workera. Historycznie zakończono lokalny odbiór
+wszystkich siedmiu map na danych syntetycznych: 3141 testów zaliczonych,
+2 opt-in pominięte; rzeczywiste demo Dust2 zaliczone osobno. Playwright:
+34 widoki przy 1440 i 390 px, grupy, trening członków i ZIP/CFG.
+Lint/format, build, Django check i kontrola migracji przeszły.
+Review bieżących zmian nie wykazało istotnych błędów ani regresji wymagających poprawek.
+Nie zastępuje to rzeczywistych dem pięciu nowych map, docelowych usług ani CS2/Yprac.
+
+Wcześniejszy odbiór
+Playwright Mirage/Dust2 na syntetycznych raportach:
 historia, raporty, trening, neutralna mapa oczekującego zadania i powtórki,
 8 stron przy 1280 i 390 px, bez poziomego przepełnienia i wyjątków JavaScript.
 Sprawdzono nawigację, trwały wybór, pobrania i zawartość CFG/ZIP oraz zapis
@@ -614,7 +667,7 @@ przed końcowym aplikacyjnym E2E rozszerzonego zakresu.
    siedmiu niezależnych eksporterów.
 3. `verify-tournament-maps`: regresja wszystkich siedmiu map oraz uprawnione,
    rzeczywiste demo każdej z nich przez upload → worker → raport → wybór →
-   eksport → ocenę/powtórkę. Syntetyczne fixture nie zastępują próby parsera.
+   eksport → trening grup/członków. Syntetyczne fixture nie zastępują próby parsera.
    Sprawdzić również nieobsługiwaną mapę, błędy wejścia, limity, usuwanie
    i zachowanie istniejących raportów Mirage. Uprawnione lokalne demo Dust2
    (build `10924`) przeszło analizę, porównanie migawki, eksport i proces
@@ -626,7 +679,7 @@ przed końcowym aplikacyjnym E2E rozszerzonego zakresu.
    ani inną integrację. Status potwierdzenia utrzymywać osobno dla każdej mapy;
    nie podnosić go zbiorczo po odbiorze tylko Mirage.
 
-**Aktualny punkt kontynuacji:** backend, UI Tactical HUD, deklarowane powtórki
+**Aktualny punkt kontynuacji:** backend, UI Tactical HUD, treningi grupowe
 i Stripe Billing są zaimplementowane i odebrane lokalnie. Etap Dust2 wraz
 z analizą rzeczywistego dema i lokalnym Playwright jest zakończony; nie wracać
 do jego implementacji ani uznawać go za pełny odbiór siedmiu map. Free to 3 analizy
@@ -661,28 +714,29 @@ ukrytych zależności.
 | `build-minimal-web` | Kod, poprawki i review gotowe; integracje do odbioru | Django/PostgreSQL, R2, Q2, kwoty, worker i reaper istnieją; do próby prawdziwe R2/Steam/SMTP, migracja profili, kontener Linux/Compose i sizing VPS | `define-saas-policies` |
 | `complete-training-backend` | Kod i lokalny odbiór gotowe | Zapamiętany wybór/odrzucenia, autoryzowany ZIP na żądanie i komendy/CFG z raportu, bez ponownej analizy; migracja `0003_training_selection`; zewnętrzny odbiór fundamentu G2 nadal otwarty | `build-minimal-web`, `assemble-training-packs` |
 | `build-training-ui` | Kod i lokalny odbiór gotowe | Szablony Tactical HUD, konta/Steam, upload/status, raport, wybór, kopiowanie, opcjonalne ZIP/CFG i jawne błędy; zewnętrzny odbiór do wykonania | `complete-training-backend` |
-| `wire-personal-training` | Kod i lokalny odbiór gotowe; aplikacyjne G3 | Deklarowane oceny, terminy 1/3/7 dni i przywracanie, prywatna stronicowana kolejka; migracja `0004_practicereview`; bez wyników mierzonych w grze | `build-training-ui` |
-| `support-tournament-maps` | Częściowe: Mirage/Dust2 | Wspólny katalog i pipeline dla dwóch map; Cache/Inferno/Nuke/Ancient/Anubis nadal poza listą obsługi | `bootstrap-cli` |
-| `adapt-multi-map-training` | Częściowe: Mirage/Dust2 | Eksporter, paczki i UI używają rzeczywistej mapy; paczki mieszane opisują mapę każdego pliku, starsze raporty Mirage pozostają obsługiwane | `support-tournament-maps`, `complete-training-backend`, `wire-personal-training` |
-| `verify-tournament-maps` | Częściowe | Regresja Mirage/Dust2, rzeczywisty parser/proces potomny/eksport Dust2 i syntetyczny Playwright desktop/mobile zaliczone; pełny upload/prawdziwe usługi i pozostałe mapy do odbioru, bez uznawania tego za odbiór gry | `adapt-multi-map-training` |
+| `wire-personal-training` | Gotowe; UI uproszczone | Biblioteka grup według wyboru, bez ocen i harmonogramu; historyczne dane i operacje legacy zachowane | `build-training-ui` |
+| `refine-group-training` | Kod i lokalny odbiór gotowe | Loader jednego etapu/2,5 s, grupy wszystkich członków, priorytet broni, wspólny opis lokacji, ZIP z CFG jednym POST i zamknięte szczegóły techniczne | `complete-training-backend`, `build-training-ui`, `wire-personal-training` |
+| `support-tournament-maps` | Kod gotowy: siedem map | Wspólny katalog i pipeline Cache/Dust2/Mirage/Inferno/Nuke/Ancient/Anubis; inne mapy jawnie odrzucane, zachowane kontrakty i limity | `bootstrap-cli` |
+| `adapt-multi-map-training` | Kod gotowy: siedem map | Eksporter, paczki i UI używają rzeczywistej mapy; paczki mieszane opisują mapę każdego pliku, stare raporty i manifesty pozostają obsługiwane | `support-tournament-maps`, `complete-training-backend`, `wire-personal-training` |
+| `verify-tournament-maps` | Częściowe | Regresja syntetyczna siedmiu map; historyczny rzeczywisty parser/worker/eksport Dust2 i odbiór Mirage; dema pięciu nowych map oraz pełny upload/prawdziwe usługi nadal do odbioru, osobno od gry | `adapt-multi-map-training` |
 | `add-operations-and-billing` | Częściowo gotowe — billing i konfiguracja wdrożeniowa w kodzie | Pozostały odbiór VPS/publicznego TLS i Stripe, backup/odtworzenie, monitoring i dobór limitów | `wire-personal-training` |
 | `prepare-deployment` | Konfiguracja i lokalny odbiór gotowe; VPS do odbioru | Caddy, statyki w obrazie, host/origin, migracje, HTTPS/logowanie/CSRF i restart sprawdzone lokalnie z testowym CA i atrapą R2; pozostały publiczny ACME, instalacja timera i odbiór po restarcie hosta | `wire-personal-training` |
 | `build-subscriptions` | Kod i lokalny odbiór; Stripe do konfiguracji | Stripe 7,99 USD/mies., Pro bez limitu analiz własnego SteamID, Free 3/miesiąc UTC; checkout/portal, webhooki, uzgodnienie stanu i anulowanie przy usunięciu; migracja `0005_billing_accounts` | `wire-personal-training` |
 | `verify-live-stripe` | Konfiguracja i odbiór do wykonania | Rzeczywisty Checkout, portal, webhooki i cykl abonamentu; test mode przed live oraz okresowe `reconcile_subscriptions` | `build-subscriptions`, `prepare-deployment` |
-| `verify-application-e2e` | Końcowy odbiór aplikacyjny | Upload → raport → eksport → ocena/powtórka dla siedmiu map oraz subskrypcja, płatności, limity, błędy, usuwanie i odtworzenie; bez pilota biznesowego | `verify-tournament-maps`, `wire-personal-training`, `add-operations-and-billing`, `build-subscriptions` |
+| `verify-application-e2e` | Końcowy odbiór aplikacyjny | Upload → raport → wybór grup → ZIP/CFG → trening członków dla siedmiu map; subskrypcja, limity, błędy, usuwanie i odtworzenie | `verify-tournament-maps`, `refine-group-training`, `add-operations-and-billing`, `build-subscriptions` |
 | `prove-scenario-import` | Odłożone na końcowy odbiór; G1 otwarte | Po aplikacyjnym E2E jedna i 10 sytuacji na każdej z siedmiu map w CS2/Yprac: indeks/gotowość bota, XYZ, oczy, broń, geometria, powtórzenie i jedno wklejenie; dowody per mapa | `verify-application-e2e` |
 
 Bieżące MVP obejmuje backend i UI, następnie końcowy odbiór w grze.
 CLI pozostaje narzędziem deweloperskim i alternatywnym sposobem użycia
-wspólnej logiki. Oceny i prosta kolejka powtórek są deklaracjami użytkownika,
-nie telemetrią z CS2.
+wspólnej logiki. Treningi grupowe nie obejmują ocen ani harmonogramu;
+kopiowanie i pobranie nie są telemetrią ukończenia ćwiczenia.
 
 ### Bramki przejścia
 
 | Bramka | Wymagany dowód | Obecny stan |
 |---|---|---|
 | G2: backend | Eksporter, paczki, upload, powiązany gracz, analiza i prywatne wyniki połączone; automatyczne testy BE i jawny status zgodności | Kod fundamentu i backendu treningowego gotowy, w tym zapis wyboru i eksporty WWW; lokalny odbiór na PostgreSQL zaliczony, usługi zewnętrzne i kontener workera nadal do odbioru |
-| G3: UI i aplikacja | Przepływ od uploadu do kopiowania komend, wybór/odrzucanie sytuacji, deklarowane oceny/powtórki i testy UI | Kod i lokalny odbiór PostgreSQL/przeglądarki gotowe na syntetycznych danych; odbiór w docelowym środowisku nadal wymagany |
+| G3: UI i aplikacja | Upload, bieżący etap, wybór grup, ZIP z CFG jednym kliknięciem, nawigacja grup/członków, prywatna biblioteka i testy UI; bez ocen/harmonogramu | Kod i lokalny odbiór PostgreSQL/Playwright gotowe na syntetycznych danych; odbiór docelowego środowiska nadal wymagany |
 | G1: integracja w grze — po G2/G3 | Jedno wklejenie automatycznie ustawia i powtarza 10 sytuacji na każdej z siedmiu map w CS2/Yprac; pozycje, oczy, broń i geometria zgodne z protokołem, wyniki per mapa | Odłożone na koniec; poprawność komend przyjęta roboczo, brak dowodu runtime |
 | G4: końcowy odbiór MVP | G2, G3, aplikacyjne E2E z abonamentem i pozytywne G1; błędy/retry, płatności, limity, uprawnienia, retencja, odtworzenie i zasoby | Do wykonania; odbiór techniczny aplikacji, nie pilot biznesowy |
 

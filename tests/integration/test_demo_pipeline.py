@@ -21,7 +21,7 @@ from cs_map_trainer.scenarios import ScenarioDocument
 def demo_path():
     value = os.environ.get("CS_MAP_TRAINER_DEMO")
     if not value:
-        pytest.skip("Set CS_MAP_TRAINER_DEMO to an authorized local Mirage or Dust2 .dem")
+        pytest.skip("Set CS_MAP_TRAINER_DEMO to an authorized local supported-map CS2 .dem")
     return Path(value)
 
 

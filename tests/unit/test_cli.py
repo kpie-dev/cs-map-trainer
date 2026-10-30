@@ -11,6 +11,7 @@ import pytest
 
 from cs_map_trainer.cli import main
 from cs_map_trainer.exporting import export_scenario
+from cs_map_trainer.maps import SUPPORTED_MAPS
 from cs_map_trainer.scenarios import MapIdentity
 
 FIXTURE = Path(__file__).parents[1] / "fixtures" / "synthetic-scenarios.json"
@@ -116,7 +117,7 @@ def test_invalid_benchmark_options_are_usage_errors(option):
     assert error.value.code == 2
 
 
-@pytest.fixture(params=["de_mirage", "de_dust2"])
+@pytest.fixture(params=SUPPORTED_MAPS)
 def fake_demo(monkeypatch, request):
     reader = SimpleNamespace(
         map=MapIdentity(name=request.param, game_build=1, revision="test-unverified"),

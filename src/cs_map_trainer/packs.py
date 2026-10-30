@@ -1,5 +1,6 @@
 """Selection and reproducible archives shared by the CLI and future web backend."""
 
+import json
 from dataclasses import dataclass
 from io import BytesIO
 from typing import Literal
@@ -20,6 +21,7 @@ from cs_map_trainer.exporting import (
 )
 from cs_map_trainer.maps import SUPPORTED_MAPS, Integration, map_label
 from cs_map_trainer.scenarios import ContractModel, MapIdentity, ScenarioDocument, Source
+from cs_map_trainer.training_groups import training_groups
 
 
 class PackEntry(ContractModel):
@@ -141,6 +143,9 @@ def _instructions(manifest: PackManifest) -> str:
         "your settings before playing elsewhere. See the manifest for the full list of changes.\n\n"
         "scenarios.json and manifest.json contain source metadata and limitations, and may\n"
         "include player identifiers. Do not publish the pack as a diagnostic log.\n"
+        "training-groups.json adds practice group identity and selected membership without\n"
+        "replacing scenarios.json or the version-1 manifest. Run every selected member\n"
+        "separately; the first member is a preview, not the entire group training.\n"
         "opponent_aim_inferred_toward_player marks estimated aim, not aim measured from\n"
         "the demo. Movement, health, armor and human opponent behavior are not reconstructed.\n\n"
         "Separate CS2/Yprac checks are required for indices, spawn readiness, XYZ positions,\n"
@@ -206,6 +211,28 @@ def build_pack(
         entries=entries,
     )
     files["manifest.json"] = manifest.model_dump_json(indent=2) + "\n"
+    files["training-groups.json"] = (
+        json.dumps(
+            {
+                "version": 1,
+                "rule": "spatial-192-angle-30-weapon-class-v1",
+                "groups": [
+                    {
+                        "group_id": group.group_id,
+                        "available_scenario_ids": group.scenario_ids,
+                        "selected_scenario_ids": [
+                            sid for sid in group.scenario_ids if sid in selected_ids
+                        ],
+                        "weapon_priority": group.priority_label,
+                    }
+                    for group in training_groups(document)
+                    if set(group.scenario_ids) & set(selected_ids)
+                ],
+            },
+            indent=2,
+        )
+        + "\n"
+    )
     files["README.txt"] = _instructions(manifest)
     output = BytesIO()
     with ZipFile(output, "w", compression=ZIP_DEFLATED) as archive:

@@ -6,11 +6,12 @@ import pytest
 
 from cs_map_trainer.analysis import AnalysisReport, Metrics
 from cs_map_trainer.benchmark import benchmark
+from cs_map_trainer.maps import SUPPORTED_MAPS
 from cs_map_trainer.parsing import DemoError
 from cs_map_trainer.scenarios import MapIdentity
 
 
-@pytest.fixture(params=["de_mirage", "de_dust2"])
+@pytest.fixture(params=SUPPORTED_MAPS)
 def report(request):
     return AnalysisReport(
         status="no_eligible_duels",

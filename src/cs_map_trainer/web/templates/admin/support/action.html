@@ -1,0 +1,18 @@
+{% extends "admin/base_site.html" %}
+{% block content %}
+<p>Target: <strong>{{ target.email }}</strong> / Account {{ target.pk }}.</p>
+{% if action == "block" or action == "unblock" %}
+<p><strong>This changes access only. Stripe subscriptions remain unchanged and charges may continue.</strong></p>
+<p>Blocking invalidates existing sessions. Running analyses may finish; stored data is retained.</p>
+{% elif action == "grant_pro" or action == "revoke_pro" %}
+<p>This changes manual Pro only. Paid Stripe access and charges remain unchanged.</p>
+{% elif action == "limit" %}
+<p>The limit applies immediately and in future UTC months. Existing usage and active analyses are retained. Active Pro still bypasses this quota.</p>
+{% elif action == "reset_password" or action == "verify_email" %}
+<p>A new link will be sent only to the current primary email. Passwords and verification state are not changed by this operation. Mail-server acceptance does not prove delivery.</p>
+{% elif action == "refresh_billing" %}
+<p>Read the current subscription and paid period from Stripe. This does not create, cancel or refund a subscription.</p>
+{% endif %}
+<form method="post">{% csrf_token %}{{ form.as_p }}<input type="submit" value="Confirm operation"></form>
+<p><a href="{% url 'admin:auth_user_change' target.pk %}">Back to account</a></p>
+{% endblock %}

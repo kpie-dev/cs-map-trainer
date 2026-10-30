@@ -158,6 +158,17 @@ def upload_detail(request, upload_id):
     return JsonResponse(serialize(upload, include_result=True))
 
 
+@require_GET
+@private
+def upload_status(request, upload_id):
+    upload = (
+        Upload.objects.exclude(state=Upload.State.DELETED)
+        .only("state", "error_code")
+        .get(pk=upload_id, owner=request.user)
+    )
+    return JsonResponse({"state": upload.state, "error": upload.error_code or None})
+
+
 @require_http_methods(["GET", "POST"])
 @private
 def upload_selection(request, upload_id):

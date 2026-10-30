@@ -4,6 +4,14 @@
   const errors = JSON.parse(document.getElementById("ui-errors").textContent);
   const csrf = () => document.querySelector("[name=csrfmiddlewaretoken]")?.value;
   const message = (code) => errors[code] || `The action failed. Error code: ${code}`;
+  function showStage(container, state) {
+    const labels = {
+      uploading: "Upload", verifying: "Verify file", queued: "Queued",
+      running: "Processing demo", ready: "Ready",
+    };
+    const current = container.querySelector("[data-current-stage]");
+    if (current) current.textContent = labels[state] || "Checking status";
+  }
 
   const guide = document.getElementById("steam-id-guide");
   const openGuide = document.getElementById("steam-id-guide-open");
@@ -17,10 +25,10 @@
     guide.addEventListener("close", () => openGuide.focus());
   }
 
-  async function request(url, data) {
+  async function request(url, data, timeoutMs = 60000) {
     let response;
     const controller = new AbortController();
-    const timeout = setTimeout(() => controller.abort(), 60000);
+    const timeout = setTimeout(() => controller.abort(), timeoutMs);
     try {
       response = await fetch(url, {
         method: data === undefined ? "GET" : "POST",
@@ -177,6 +185,10 @@
         });
       }
       busy = true;
+      const stages = document.getElementById("upload-stages");
+      stages.hidden = false;
+      stages.classList.remove("polling-paused");
+      showStage(stages, reservation.transferred ? "verifying" : "uploading");
       submit.disabled = true;
       input.disabled = true;
       rights.disabled = true;
@@ -204,8 +216,11 @@
             remember({ ...reservation, transferred: true });
           }
           feedback.textContent = "Verifying your file and queuing the analysis…";
+          showStage(stages, "verifying");
+          progress.hidden = true;
           await request(`/backend/uploads/${started.id}/complete/`, {});
         }
+        showStage(stages, started.state === "uploading" ? "queued" : started.state);
         remember(null);
         window.location.assign(`/uploads/${started.id}/`);
       } catch (error) {
@@ -215,6 +230,7 @@
           remember(null);
         }
         feedback.textContent = error.message;
+        stages.classList.add("polling-paused");
         submit.textContent = "Retry this upload";
       } finally {
         busy = false;
@@ -222,6 +238,117 @@
         input.disabled = false;
         rights.disabled = false;
         steamId.disabled = false;
+      }
+    });
+  }
+
+  const selection = document.getElementById("selection-form");
+  if (selection) {
+    const choices = [...selection.querySelectorAll('input[name="group"]')];
+    const count = document.getElementById("selection-count");
+    const feedback = document.getElementById("selection-feedback");
+    const bar = selection.querySelector(".selection-actions");
+    if (typeof ResizeObserver !== "undefined") {
+      new ResizeObserver(() => {
+        selection.style.setProperty("--selection-bar-height", `${bar.offsetHeight + 20}px`);
+      }).observe(bar);
+    }
+    const partialControl = (item) => selection.querySelector(`[name="partial_${item.value}"]`);
+    choices.forEach((item) => {
+      item.indeterminate = item.dataset.partial === "true";
+      item.addEventListener("change", () => {
+        const partial = partialControl(item);
+        if (partial) partial.value = "clear";
+        item.indeterminate = false;
+      });
+    });
+    const selectedCount = (item) => item.checked ? Number(item.dataset.count)
+      : partialControl(item)?.value === "preserve" ? Number(item.dataset.selected) : 0;
+    const updateCount = () => {
+      count.textContent = choices.reduce((sum, item) => sum + selectedCount(item), 0);
+      document.getElementById("group-count").textContent = choices.filter(
+        (item) => selectedCount(item) > 0,
+      ).length;
+      choices.forEach((item) => {
+        item.indeterminate = !item.checked && selectedCount(item) > 0;
+      });
+    };
+    updateCount();
+    selection.addEventListener("change", updateCount);
+    for (const [id, checked] of [["select-all", true], ["clear-selection", false]]) {
+      const button = document.getElementById(id);
+      button.hidden = false;
+      button.addEventListener("click", () => {
+        choices.forEach((item) => {
+          item.checked = checked;
+          item.indeterminate = false;
+          const partial = partialControl(item);
+          if (partial) partial.value = "clear";
+        });
+        updateCount();
+      });
+    }
+    let downloading = false;
+    selection.addEventListener("submit", async (event) => {
+      const intent = event.submitter?.value || "download";
+      if (downloading) { event.preventDefault(); return; }
+      if (!choices.some((item) => selectedCount(item) > 0)) {
+        event.preventDefault();
+        feedback.textContent = message("invalid_scenario_selection");
+        return;
+      }
+      if (intent !== "download") return;
+      event.preventDefault();
+      const data = new FormData(selection);
+      data.set("intent", "download");
+      const controls = [...selection.querySelectorAll("button, input[type=checkbox], select")];
+      downloading = true;
+      controls.forEach((control) => { control.disabled = true; });
+      feedback.textContent = "Preparing your selected training…";
+      const controller = new AbortController();
+      const timeout = setTimeout(() => controller.abort(), 60000);
+      try {
+        const response = await fetch(selection.action, {
+          method: "POST", body: data, credentials: "same-origin",
+          headers: { "Accept": "application/json", "X-CSRFToken": csrf() },
+          signal: controller.signal,
+        });
+        const type = response.headers.get("content-type") || "";
+        if (!response.ok || !type.includes("application/zip")) {
+          if (type.includes("application/json")) {
+            const result = await response.json();
+            selection.querySelectorAll(".export-failure").forEach((item) => item.remove());
+            for (const id of result.scenario_ids || []) {
+              const choice = choices.find((item) => item.closest(".situation").dataset.members.split(" ").includes(id));
+              if (!choice) continue;
+              const warning = document.createElement("p");
+              warning.className = "danger export-failure";
+              warning.textContent = "Cannot export a member of this group. Uncheck the group to continue.";
+              choice.closest(".situation").append(warning);
+            }
+            throw new Error(message(result.error || `HTTP ${response.status}`));
+          }
+          throw new Error(`Download not confirmed (HTTP ${response.status}). Check that you are signed in, then retry.`);
+        }
+        const blob = await response.blob();
+        const url = URL.createObjectURL(blob);
+        const link = document.createElement("a");
+        link.href = url;
+        const disposition = response.headers.get("content-disposition") || "";
+        link.download = disposition.match(/filename="([^"]+)"/)?.[1] || "training.zip";
+        document.body.append(link);
+        link.click();
+        link.remove();
+        setTimeout(() => URL.revokeObjectURL(url), 60000);
+        feedback.textContent = "Selection saved. Training ZIP with CFG files download started.";
+      } catch (error) {
+        feedback.textContent = error.name === "AbortError"
+          ? "Download timed out. Your checkboxes are unchanged; retry to confirm the selection and download."
+          : `Download failed. ${error.message} Your checkboxes are unchanged; retry when ready.`;
+      } finally {
+        clearTimeout(timeout);
+        downloading = false;
+        controls.forEach((control) => { control.disabled = false; });
       }
     });
   }
@@ -237,6 +364,7 @@
         await navigator.clipboard.writeText(line.value);
         feedback.textContent = "Complete line copied. Paste it once into the CS2 console in your Yprac session.";
       } catch (error) {
+        document.getElementById("command-text").open = true;
         line.focus();
         line.select();
         feedback.textContent = "Clipboard access is unavailable. The text is selected; copy it manually.";
@@ -253,39 +381,64 @@
     const states = {
       uploading: "Waiting for your file",
       queued: "Queued",
-      running: "Analyzing demo",
+      running: "Processing demo",
     };
-    let remaining = 120;
+    showStage(job, job.dataset.state);
+    let deadline = performance.now() + 10 * 60 * 1000;
     let timer;
     let busy = false;
+    function pause(text) {
+      feedback.textContent = text;
+      job.classList.add("polling-paused");
+      refresh.hidden = false;
+      job.setAttribute("aria-busy", "false");
+    }
     async function update() {
       if (busy) return;
       clearTimeout(timer);
+      if (performance.now() >= deadline) {
+        pause("Automatic updates paused after 10 minutes. Retry status updates to continue; analysis is not restarted.");
+        return;
+      }
       busy = true;
+      job.setAttribute("aria-busy", "true");
       refresh.disabled = true;
       try {
-        const result = await request(job.dataset.statusUrl);
+        const result = await request(
+          job.dataset.statusUrl, undefined, Math.min(60000, deadline - performance.now()),
+        );
         if (!Object.hasOwn(states, result.state)) {
-          window.location.reload();
-          return;
+          if (["ready", "unsupported", "failed", "expired"].includes(result.state)) {
+            window.location.reload();
+            return;
+          }
+          throw new Error("The server returned an unknown analysis state. Retry status updates to try again.");
         }
         document.getElementById("job-state").textContent = states[result.state];
-        remaining -= 1;
-        if (remaining > 0) {
+        showStage(job, result.state);
+        if (performance.now() < deadline) {
           feedback.textContent = "Status updated. The analysis has not been restarted.";
-          timer = setTimeout(update, 5000);
+          timer = setTimeout(update, Math.min(2500, deadline - performance.now()));
         } else {
-          feedback.textContent = "Automatic updates have stopped. Select Refresh status to check again.";
+          pause("Automatic updates paused after 10 minutes. Retry status updates to continue; analysis is not restarted.");
         }
       } catch (error) {
-        feedback.textContent = `${error.message} Automatic status updates have stopped.`;
+        pause(performance.now() >= deadline
+          ? "Automatic updates paused after 10 minutes. Retry status updates to continue; analysis is not restarted."
+          : `${error.message} Automatic status updates have stopped. Retry status updates to continue.`);
       } finally {
         busy = false;
         refresh.disabled = false;
       }
     }
-    refresh.addEventListener("click", () => { remaining = 120; update(); });
-    timer = setTimeout(update, 5000);
+    refresh.addEventListener("click", () => {
+      deadline = performance.now() + 10 * 60 * 1000;
+      job.classList.remove("polling-paused");
+      refresh.hidden = true;
+      update();
+    });
+    job.setAttribute("aria-busy", "true");
+    timer = setTimeout(update, 2500);
     window.addEventListener("pagehide", () => clearTimeout(timer));
   }
 })();

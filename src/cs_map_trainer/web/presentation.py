@@ -2,7 +2,10 @@
 
 from django.conf import settings
 
+from cs_map_trainer.maps import SUPPORTED_MAP_LABELS, SUPPORTED_MAP_NAMES
+
 from .billing import paid_access
+from .entitlements import manual_access, monthly_limit
 from .identity import verified_email
 from .models import AccountPreferences
 from .services import quota_used
@@ -10,7 +13,7 @@ from .services import quota_used
 STATES = {
     "uploading": "Waiting for your file",
     "queued": "Queued",
-    "running": "Analyzing demo",
+    "running": "Processing demo",
     "ready": "Report ready",
     "unsupported": "Unsupported demo",
     "failed": "Analysis failed",
@@ -18,9 +21,10 @@ STATES = {
 }
 ERRORS = {
     "verified_email_required": "Verify your email address to continue.",
+    "account_blocked": "Your account is blocked. Contact support.",
     "invalid_player_steam_id": "Enter a SteamID64 consisting of exactly 17 digits.",
     "monthly_demo_limit": (
-        "You have used your 3 free analyses for this UTC calendar month. "
+        "You have used your free analysis allowance for this UTC calendar month. "
         "Wait until next month or upgrade to Pro."
     ),
     "billing_not_configured": "Payments are not available yet. Contact the administrator.",
@@ -56,7 +60,7 @@ ERRORS = {
         "This upload reservation belongs to a different file or SteamID. Use the original values."
     ),
     "unsupported_or_invalid_demo": (
-        "This file is invalid or unsupported. Choose a CS2 demo from Mirage or Dust2."
+        f"This file is invalid or unsupported. Choose a CS2 demo from: {SUPPORTED_MAP_LABELS}."
     ),
     "linked_player_not_in_demo": (
         "The selected SteamID was not found in this demo. Check the ID before uploading again. "
@@ -81,7 +85,8 @@ ERRORS = {
         "This scenario selection is invalid. Refresh the report and try again."
     ),
     "scenario_not_exportable": (
-        "This scenario cannot be exported. Return to the report and choose another."
+        "One or more selected scenarios cannot be exported. No selection was saved. "
+        "Check their data and explicitly uncheck unsupported scenarios, then retry."
     ),
     "scenario_not_found": "This scenario was not found in the report.",
     "invalid_practice_rating": "Choose one of the available practice ratings.",
@@ -199,6 +204,9 @@ def ui_context(request):
     last_player_steam_id = ""
     used = None
     paid = False
+    manual = False
+    manual_until = None
+    limit = settings.DEMO_MONTHLY_LIMIT
     if request.user.is_authenticated:
         last_player_steam_id = (
             AccountPreferences.objects.filter(owner=request.user)
@@ -208,11 +216,27 @@ def ui_context(request):
         )
         used = quota_used(request.user)
         paid = paid_access(request.user)
+        manual = manual_access(request.user)
+        limit = monthly_limit(request.user)
+        if manual:
+            manual_until = request.user.account_policy.manual_pro_until
+    errors = dict(ERRORS)
+    if request.user.is_authenticated:
+        errors["monthly_demo_limit"] = (
+            f"You have used your {limit} free analyses for this UTC calendar month. "
+            "Wait until next month or upgrade to Pro."
+        )
     return {
+        "supported_map_labels": SUPPORTED_MAP_LABELS,
+        "supported_map_names": SUPPORTED_MAP_NAMES,
         "last_player_steam_id": last_player_steam_id,
         "email_verified": verified_email(request.user),
         "quota_used": used,
-        "quota_limit": settings.DEMO_MONTHLY_LIMIT,
-        "paid_plan": paid,
-        "ui_errors": ERRORS,
+        "quota_limit": limit,
+        "quota_remaining": max(0, limit - used) if used is not None else None,
+        "paid_plan": paid or manual,
+        "stripe_paid_plan": paid,
+        "manual_pro": manual,
+        "manual_pro_until": manual_until,
+        "ui_errors": errors,
     }

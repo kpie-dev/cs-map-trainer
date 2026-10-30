@@ -13,12 +13,15 @@
   <span class="eyebrow">SUBSCRIPTION / STRIPE BILLING</span>
   <h2>Pro / $7.99/month</h2>
   <p>Unlimited analyses on <strong>your account</strong>.
-    Free includes 3 analyses per UTC calendar month.
+    Your free allowance is {{ quota_limit }} analyses per UTC calendar month.
     Both plans have a 1 GiB file limit, one active upload or analysis per account, and one analysis running at a time across the service. Changing SteamID does not reset your limit.</p>
-  {% if paid_plan %}
+  {% if stripe_paid_plan %}
     <p class="notice success">Pro is active. Paid access until {{ billing.paid_until|date:"j M Y, H:i" }} UTC.</p>
-  {% else %}
+  {% elif not manual_pro %}
     <p>You are on the Free plan.</p>
+  {% endif %}
+  {% if manual_pro %}
+    <p class="notice success">Manual Pro access until {{ manual_pro_until|date:"j M Y, H:i" }} UTC. This grant is not a paid Stripe subscription.</p>
   {% endif %}
   {% if billing %}
     {% if billing.status %}<p class="telemetry">STRIPE STATUS: {{ billing.status }}</p>{% endif %}
@@ -27,17 +30,17 @@
   {% endif %}
   {% if email_verified %}
     <div class="actions">
-      {% if not paid_plan %}<form action="{% url 'billing_checkout' %}" method="post">{% csrf_token %}<button class="primary" type="submit">Subscribe to Pro / $7.99/month</button></form>{% endif %}
+      {% if not stripe_paid_plan %}<form action="{% url 'billing_checkout' %}" method="post">{% csrf_token %}<button class="primary" type="submit">Subscribe to Pro / $7.99/month</button></form>{% endif %}
       {% if billing.customer_id %}
         <form action="{% url 'billing_portal' %}" method="post">{% csrf_token %}<button type="submit">Manage subscription in Stripe</button></form>
         <form action="{% url 'billing_refresh' %}" method="post">{% csrf_token %}<button type="submit">Refresh payment status</button></form>
       {% endif %}
     </div>
   {% else %}<p>Verify your email before subscribing.</p>{% endif %}
-  <p class="muted">Stripe handles payments and card details. Your subscription renews monthly.
+  <p class="muted">Stripe handles payments and card details. Paid Stripe subscriptions renew monthly; manual Pro grants do not create or cancel a subscription.
     Cancellation takes effect at the end of the paid period. A failed renewal does not extend access.
-    When paid access ends, Free limits apply again. Analyses already started are not interrupted.</p>
+    When all Pro access ends, your free allowance applies again with existing monthly usage retained. Analyses already started are not interrupted.</p>
 </section>
-<section class="panel"><h2>Your data</h2><p>Your raw demo is deleted after the first analysis attempt. Reports, selections and self-reported practice ratings stay until you delete them. We do not use them to train models.</p><p>We store the SteamID for each analysis and your last used ID as a suggestion on your account. Neither verifies profile ownership. Reports are private to the account that uploaded the demo, even if another account enters the same SteamID.</p><p>Deleting your account removes the suggestion and results. Minimal upload records, including the selected SteamID, remain through the current UTC month and until input cleanup succeeds. There is no SteamID lock or cross-account quota. A minimal Stripe customer reference remains to handle delayed events and payment cancellation. The payment provider retains billing records.</p></section>
+<section class="panel"><h2>Your data</h2><p>Your raw demo is deleted after the first analysis attempt. Reports, selections and any historical self-reported practice ratings stay until you delete them. Ratings are no longer used by the practice library. We do not use them to train models.</p><p>We store the SteamID for each analysis and your last used ID as a suggestion on your account. Neither verifies profile ownership. Reports are private to the account that uploaded the demo, even if another account enters the same SteamID.</p><p>Deleting your account removes the suggestion and results. Minimal upload records, including the selected SteamID, remain through the current UTC month and until input cleanup succeeds. There is no SteamID lock or cross-account quota. A minimal Stripe customer reference remains to handle delayed events and payment cancellation. The payment provider retains billing records.</p></section>
 {% if email_verified %}<section class="panel danger"><h2>Delete your account and results</h2><p>This cannot be undone. Wait for any active analysis to finish first. Before deleting your account, we immediately cancel your subscription and open checkout sessions, with no automatic refund. If Stripe does not confirm cancellation, your account will not be deleted.</p><form method="post" action="{% url 'remove_account' %}">{% csrf_token %}<label for="delete-password">Confirm your password</label><input id="delete-password" name="password" type="password" autocomplete="current-password" required><label class="check"><input name="confirm" value="yes" type="checkbox" required> I understand that my reports and ratings will be deleted and my subscription canceled, with no automatic refund.</label><button class="destructive" type="submit">Delete my account</button></form></section>{% endif %}
 {% endblock %}

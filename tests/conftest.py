@@ -3,6 +3,7 @@ from pathlib import Path
 
 import pytest
 
+from cs_map_trainer.maps import SUPPORTED_MAPS
 from cs_map_trainer.scenarios import ScenarioDocument
 
 FIXTURE = Path(__file__).parent / "fixtures" / "synthetic-scenarios.json"
@@ -13,7 +14,7 @@ def payload():
     return json.loads(FIXTURE.read_text())
 
 
-@pytest.fixture(params=["de_mirage", "de_dust2"])
+@pytest.fixture(params=SUPPORTED_MAPS)
 def training_document(payload, request):
     scenario = payload["scenarios"][0]
     scenario["map"]["name"] = request.param

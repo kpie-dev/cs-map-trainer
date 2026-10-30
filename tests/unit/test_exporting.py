@@ -142,9 +142,10 @@ def test_synthetic_nonplayable_fixture_is_rejected(payload):
         export_scenario(Scenario.model_validate(payload["scenarios"][0]))
 
 
-def test_unsupported_map_is_rejected(training_document):
+@pytest.mark.parametrize("map_name", ["de_train", "de_overpass", "de_unknown"])
+def test_unsupported_map_is_rejected(training_document, map_name):
     scenario = training_document.scenarios[0]
-    scenario.map.name = "de_inferno"
+    scenario.map.name = map_name
     with pytest.raises(ExportError, match="de_mirage"):
         export_scenario(scenario)
 
@@ -156,3 +157,15 @@ def test_too_long_single_paste_is_an_explicit_error(training_document):
             setattr(participant.position, field, 5e-324)
     with pytest.raises(ExportError, match="byte budget"):
         export_scenario(scenario)
+
+
+def test_nuke_export_preserves_separate_floor_heights(training_document):
+    scenario = training_document.scenarios[0]
+    scenario.map.name = "de_nuke"
+    scenario.player.position.z = -640.25
+    scenario.opponent.position.z = -416.5
+    result = export_scenario(scenario)
+    player = scenario.player.position
+    opponent = scenario.opponent.position
+    assert f"setpos_exact {player.x} {player.y} -640.25" in result.commands
+    assert f"setpos_player 2 {opponent.x} {opponent.y} -416.5" in result.commands

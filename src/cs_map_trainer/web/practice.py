@@ -5,6 +5,9 @@ from datetime import timedelta
 from django.db import transaction
 from django.utils import timezone
 
+from cs_map_trainer.training_groups import practice_priority
+
+from .grouping import present_groups
 from .models import PracticeReview, Upload
 from .services import (
     IntakeError,
@@ -77,4 +80,34 @@ def practice_queue(user, category):
     return sorted(
         entries,
         key=lambda item: (item["sort_at"], str(item["upload"].pk), item["scenario"].scenario_id),
+    )
+
+
+def practice_library(user):
+    """Selected scenarios from every ready report, independent of legacy reviews."""
+    entries = []
+    uploads = (
+        Upload.objects.filter(owner=user, state=Upload.State.READY)
+        .defer("scripts")
+        .order_by("created_at", "id")
+    )
+    for upload in uploads.iterator():
+        report = validated_report(upload)
+        if report.status == "no_eligible_duels" and report.scenario_document is None:
+            continue
+        document = training_document(upload, report)
+        _, selected = saved_selection(upload, document)
+        entries.extend(
+            {"upload": upload, "scenario": group["first"]["scenario"], "group": group}
+            for group in present_groups(report, {s.scenario_id for s in selected.scenarios})
+            if group["selected"]
+        )
+    return sorted(
+        entries,
+        key=lambda item: (
+            practice_priority(item["scenario"]),
+            item["upload"].created_at,
+            str(item["upload"].pk),
+            item["group"]["group_id"],
+        ),
     )

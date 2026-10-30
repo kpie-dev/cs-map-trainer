@@ -1,7 +1,7 @@
-from django.contrib import admin
 from django.urls import include, path
 
 from . import billing_views, pages, views
+from .admin import site
 
 urlpatterns = [
     path("", pages.home, name="home"),
@@ -23,11 +23,13 @@ urlpatterns = [
         name="review",
     ),
     path("practice/", pages.practice, name="practice"),
-    path("admin/", admin.site.urls),
+    path("admin/", site.urls),
     path("accounts/", include("allauth.account.urls")),
+    path("accounts/2fa/", include("allauth.mfa.urls")),
     path("backend/history/", views.history),
     path("backend/uploads/", views.upload_start),
     path("backend/uploads/<uuid:upload_id>/complete/", views.upload_complete),
+    path("backend/uploads/<uuid:upload_id>/status/", views.upload_status),
     path("backend/uploads/<uuid:upload_id>/", views.upload_detail),
     path("backend/uploads/<uuid:upload_id>/selection/", views.upload_selection),
     path("backend/uploads/<uuid:upload_id>/pack/", views.upload_pack),

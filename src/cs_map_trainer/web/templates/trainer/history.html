@@ -3,7 +3,7 @@
 <div class="page-heading"><span class="eyebrow">PRIVATE HISTORY</span><h1>My analyses</h1><p>Your reports and upload status. Raw demos are not kept as an archive.</p><a class="button primary" href="{% url 'home' %}">Upload demo</a></div>
 <section class="panel">
 {% for upload in page %}<a class="history-row" href="{% url 'report' upload.pk %}"><div><strong>{{ upload.map_label }} / {{ upload.created_at|date:"j M Y, H:i" }} UTC</strong><small class="telemetry">{{ upload.pk }}</small></div><span class="badge {% if upload.state == 'ready' %}green{% endif %}">{{ upload.state_label }}</span></a>
-{% empty %}<h2>No analyses yet</h2><p>Upload your first CS2 demo from Mirage or Dust2 to find duels for practice.</p>{% endfor %}
+{% empty %}<h2>No analyses yet</h2><p>Upload your first CS2 demo from {{ supported_map_labels }} to find duels for practice.</p>{% endfor %}
 </section>
 {% include "trainer/pagination.html" %}
 {% endblock %}

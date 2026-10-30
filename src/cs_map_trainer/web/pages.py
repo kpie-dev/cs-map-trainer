@@ -5,6 +5,7 @@ from django.contrib.auth import logout
 from django.contrib.auth.decorators import login_required
 from django.core.paginator import Paginator
 from django.db.models.fields.json import KeyTextTransform
+from django.http import HttpResponse, JsonResponse
 from django.shortcuts import redirect, render
 from django.views.decorators.cache import never_cache
 from django.views.decorators.http import require_GET, require_POST
@@ -13,11 +14,13 @@ from cs_map_trainer.analysis import BASE_LIMITATIONS
 from cs_map_trainer.callouts import format_place_name
 from cs_map_trainer.exporting import ASSUMPTIONS, SESSION_CHANGES, ExportError, export_scenario
 from cs_map_trainer.maps import map_label
+from cs_map_trainer.training_groups import expand_group_selection
 
 from . import billing
+from .grouping import present_groups
 from .identity import verified_email
-from .models import BillingAccount, PracticeReview, Upload
-from .practice import practice_queue, review_scenario
+from .models import BillingAccount, Upload
+from .practice import practice_library, review_scenario
 from .presentation import LIMITATIONS, STATES, error_message
 from .services import (
     ACTIVE,
@@ -26,6 +29,7 @@ from .services import (
     delete_history,
     get_training_selection,
     save_training_selection,
+    submit_training_selection,
     training_result,
     validated_report,
 )
@@ -128,6 +132,10 @@ def history(request):
 @require_GET
 @private_page
 def report(request, upload_id):
+    return render_report(request, upload_id)
+
+
+def render_report(request, upload_id, *, submitted=None, error=None):
     upload = Upload.objects.exclude(state=Upload.State.DELETED).get(
         pk=upload_id, owner=request.user
     )
@@ -137,6 +145,7 @@ def report(request, upload_id):
         "active": upload.state in ACTIVE,
         "failure": error_message(upload.error_code) if upload.error_code else None,
         "map_label": map_label(None),
+        "selection_error": error_message(error.code) if error else None,
     }
     if upload.state == Upload.State.READY:
         analysis = validated_report(upload)
@@ -151,6 +160,7 @@ def report(request, upload_id):
                 context["situations"].append(
                     {
                         "scenario": item,
+                        "export_failed": error and item.scenario_id in error.scenario_ids,
                         "locations": locations,
                         "victim_location": format_place_name(item.map.name, locations.player)
                         if locations
@@ -178,12 +188,80 @@ def report(request, upload_id):
                     if code in BASE_LIMITATIONS and code not in context["limitations"]:
                         context["limitations"].append(code)
             context["selected_count"] = len(selection["selected_scenario_ids"])
-    return render(request, "trainer/report.html", context)
+            if submitted is not None:
+                for item in context["situations"]:
+                    item["choice"] = (
+                        "include" if item["scenario"].scenario_id in submitted else "omit"
+                    )
+                context["selected_count"] = len(submitted)
+            context["training_groups"] = present_groups(
+                analysis,
+                submitted if submitted is not None else selection["selected_scenario_ids"],
+            )
+            context["selected_group_count"] = sum(
+                bool(group["selected"]) for group in context["training_groups"]
+            )
+            for group in context["training_groups"]:
+                group["export_failed"] = bool(
+                    error
+                    and any(
+                        member["scenario"].scenario_id in error.scenario_ids
+                        for member in group["members"]
+                    )
+                )
+    return render(request, "trainer/report.html", context, status=error.status if error else 200)
 
 
 @require_POST
 @private_page
 def selection(request, upload_id):
+    if request.POST.get("selection_ui") in {"checkboxes", "groups"}:
+        grouped = request.POST.get("selection_ui") == "groups"
+        included = request.POST.getlist("group" if grouped else "include")
+        partial = None
+        intent = request.POST.get("intent")
+        try:
+            if grouped:
+                partial = {}
+                for key in request.POST:
+                    if key.startswith("partial_"):
+                        values = request.POST.getlist(key)
+                        if len(values) != 1:
+                            raise IntakeError("invalid_selection_payload", 400)
+                        gid = key.removeprefix("partial_")
+                        partial[gid] = {
+                            "action": values[0],
+                            "members": request.POST.getlist(f"members_{gid}"),
+                        }
+                if {
+                    key.removeprefix("members_")
+                    for key in request.POST
+                    if key.startswith("members_")
+                } != set(partial):
+                    raise IntakeError("invalid_selection_payload", 400)
+            if intent not in {"download", "practice"}:
+                raise IntakeError("invalid_selection_payload", 400)
+            pack = submit_training_selection(
+                request.user, upload_id, included, download=intent == "download", partial=partial
+            )
+        except IntakeError as error:
+            if request.headers.get("Accept") == "application/json":
+                return JsonResponse(
+                    {"error": error.code, "scenario_ids": error.scenario_ids}, status=error.status
+                )
+            submitted = included
+            if grouped:
+                try:
+                    _, document = training_result(request.user, upload_id)
+                    submitted = expand_group_selection(document, included, partial or {})
+                except (ValueError, TypeError, IntakeError):
+                    submitted = None
+            return render_report(request, upload_id, submitted=submitted, error=error)
+        if pack is not None:
+            response = HttpResponse(pack.archive, content_type="application/zip")
+            response["Content-Disposition"] = f'attachment; filename="training-{upload_id}.zip"'
+            return response
+        return redirect("training", upload_id=upload_id)
     _, document = training_result(request.user, upload_id)
     include, reject = [], []
     for item in document.scenarios:
@@ -209,11 +287,25 @@ def training(request, upload_id):
         for item in document.scenarios
         if item.scenario_id in selection["selected_scenario_ids"]
     ]
-    scenario_id = request.GET.get("scenario", scenarios[0].scenario_id)
+    analysis = validated_report(upload)
+    groups = [
+        group
+        for group in present_groups(analysis, selection["selected_scenario_ids"])
+        if group["selected"]
+    ]
+    scenario_id = request.GET.get("scenario", groups[0]["first"]["scenario"].scenario_id)
     current = next((item for item in scenarios if item.scenario_id == scenario_id), None)
     if current is None:
         raise IntakeError("scenario_not_found", 404)
-    index = scenarios.index(current)
+    current_group = next(
+        group
+        for group in groups
+        if any(member["scenario"] == current for member in group["selected"])
+    )
+    index = groups.index(current_group)
+    members = [member["scenario"] for member in current_group["selected"]]
+    member_index = members.index(current)
+    locations = analysis.scenario_locations.get(current.scenario_id)
     exported, export_error = None, None
     try:
         exported = export_scenario(current)
@@ -228,13 +320,27 @@ def training(request, upload_id):
             "current": current,
             "map_label": map_label(current.map.name),
             "position": index + 1,
-            "previous": scenarios[index - 1] if index else None,
-            "following": scenarios[index + 1] if index + 1 < len(scenarios) else None,
+            "training_groups": groups,
+            "current_group": current_group,
+            "member_position": member_index + 1,
+            "current_member": next(
+                member for member in current_group["selected"] if member["scenario"] == current
+            ),
+            "previous": groups[index - 1]["first"]["scenario"] if index else None,
+            "following": groups[index + 1]["first"]["scenario"]
+            if index + 1 < len(groups)
+            else None,
             "exported": exported,
             "export_error": export_error,
             "limitations": [LIMITATIONS.get(code, code) for code in current.limitations],
-            "review": upload.practice_reviews.filter(scenario_id=scenario_id).first(),
-            "ratings": PracticeReview.Rating.choices,
+            "warnings": [code for code in current.limitations if code not in BASE_LIMITATIONS],
+            "player_location": format_place_name(current.map.name, locations.player)
+            if locations
+            else None,
+            "opponent_location": format_place_name(current.map.name, locations.opponent)
+            if locations
+            else None,
+            "locations_recorded": locations is not None,
             "assumptions": ASSUMPTIONS,
             "session_changes": SESSION_CHANGES,
         },
@@ -258,12 +364,11 @@ def review(request, upload_id, scenario_id):
 @require_GET
 @private_page
 def practice(request):
-    category = request.GET.get("filter", "due")
-    entries = practice_queue(request.user, category)
+    entries = practice_library(request.user)
     return render(
         request,
         "trainer/practice.html",
-        {"page": Paginator(entries, 20).get_page(request.GET.get("page")), "category": category},
+        {"page": Paginator(entries, 20).get_page(request.GET.get("page"))},
     )
 
 

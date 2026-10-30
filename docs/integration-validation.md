@@ -29,13 +29,122 @@ jedno wklejenie do konsoli; plik CFG jest opcjonalny. Nie zaliczamy ręcznego
 ustawiania botów. Ten cel zastępuje wcześniejszą próbę
 integracji wyłącznie ze zwykłą lokalną sesją CS2.
 
+## Aktualny odbiór ścieżki upload → wybór → trening
+
+UI pozostaje po angielsku. Starsze opisy ocen i harmonogramu w zapisach
+odbioru poniżej są historyczne, nie opisują bieżącego interfejsu.
+Oceny `PracticeReview` pozostają w bazie i są usuwane z raportem/kontem,
+lecz nie wpływają na bibliotekę `/practice/`.
+
+Sprawdzić osobno dla Mirage i Dust2:
+
+1. Rzeczywisty procent PUT, etap Verify file podczas `complete`, następnie
+   Queued → Processing demo → Ready z serwera. `running` nie ma procentów/ETA.
+   Lekki prywatny `/backend/uploads/<id>/status/` zwraca tylko stan i błąd;
+   pełny odczyt nadal zwraca raport. Błąd sieci/sesji i limit 10 minut
+   zatrzymują polling z jawnym komunikatem i ręcznym wznowieniem.
+   Loader pokazuje tylko aktualny etap i spinner; polling co 2,5 s według
+   deadline 10 minut. Retry pojawia się wyłącznie po błędzie/przerwie.
+   Ponowienie potwierdzenia po udanym PUT nie wysyła dema ponownie.
+2. Wszystkie sytuacje początkowo zaznaczone. Jeden checkbox obejmuje całą grupę
+   podobnych scenariuszy, nie tylko reprezentanta. Odznaczyć grupę i jednym kliknięciem
+   Download training (.zip) otrzymać CFG, TXT, manifest i instrukcję bez nawigacji.
+   Bieżące checkboxy mają odpowiadać wszystkim plikom; równoległy zapis w drugiej
+   karcie nie może zmienić odpowiedzi pierwszego POST. Open practice także
+   zapisuje bieżący wybór. Standardowy formularz działa bez JS.
+   Sprawdzić `training-groups.json` i komplet CFG/TXT wszystkich członków.
+   Historyczny częściowy wybór musi pozostać dokładny (indeterminate i opis,
+   zachowanie/wyczyszczenie bez JS); zaznaczenie grupy dodaje jawnie resztę.
+3. Pusty/nieprawidłowy wybór oraz błąd eksportu: brak zapisu sukcesu, brak
+   archiwum błędu HTML, zachowane checkboxy; wadliwych sytuacji nie pomijać
+   automatycznie. Sprawdzić legacy include/reject i utrzymanie dawnych odrzuceń
+   do ponownego zaznaczenia. Eksport ma działać z walidowanego raportu bez
+   dema/R2 i bez zaufania do zapisanego pola scripts.
+4. Trening: Copy commands w pierwszym widoku 1440 × 900 oraz 390 × 900,
+   Previous/Next group oraz przełączanie każdego członka bez oceniania,
+   poprawna mapa/lokacje/bronie w jednej linii ze stronami, schowek i ręczny
+   fallback, zwinięta lista sytuacji i dane techniczne. Widoczne ostrzeżenie
+   lokalnej sesji i `unverified_in_game`. Biblioteka obejmuje również starsze
+   niż 100 raportów, niezależnie od ocen; stronicowanie po 20 i prywatność.
+5. Zmierzyć 10 syntetycznych sytuacji z jednym ostrzeżeniem celowania:
+   zwinięty wiersz ≤160 px przy 1440 px, ≤220 px przy 390 px. Bez obcinania
+   treści; sprawdzić długie i nieznane etykiety, stare raporty bez lokacji
+   i brak lokacji jednego gracza. Przyciski eksportu dostępne bez przewijania
+   całej listy. Fokus nie może znikać pod paskiem akcji; cele minimum 44 × 44,
+   obsługa klawiaturą, reduced motion i brak poziomego przepełnienia.
+6. Konserwatywne grupowanie z README: zgodność każdej pary obu pozycji
+   (3D ≤192, Z ≤64), kątów (yaw ≤30°, pitch ≤20°), mapy/stron/klas broni/kontekstu.
+   Wspólny callout nie może połączyć odległych scenariuszy. Osobno sprawdzić
+   AK/M4 w tej samej klasie, AWP, estymowane kąty, brak lokacji i nieznaną broń.
+   Priorytet: własny rifle/sniper vs pistol/SMG, potem pełne bronie obu,
+   neutralne zestawy, na końcu własny pistol/SMG. To preferencja treningowa,
+   nie pomiar błędów/umiejętności ani zapisanej ekonomii. Statystyki raportu
+   pozostają odrębne. Biblioteka pokazuje jeden wiersz na wybraną grupę.
+
+Testy syntetyczne UI/BE nie potwierdzają działania w CS2 ani rzeczywistego
+R2. G1 poniżej pozostaje osobnym odbiorem komend i CFG na obu mapach;
+bez dostępu do gry wynik jest blocked, nie pass.
+
+Historyczny lokalny odbiór uproszczonego UI sprzed grup treningowych, na izolowanej bazie i syntetycznych raportach
+Mirage/Dust2: przy 10 sytuacjach z jednym ostrzeżeniem zwinięte wiersze mają
+około 140 px przy szerokości 1440 px i 135 px przy 390 px. Dolna krawędź
+przycisku kopiowania znajduje się odpowiednio około 399 i 439 px od góry
+widoku; brak poziomego przepełnienia w tej próbce. Potwierdzono zapis wyboru
+przez Open practice, ZIP z wybraną sytuacją i CFG bez zmiany strony, pobranie
+przez formularz bez JS, zachowanie checkboxów po HTTP 503 zamiast archiwum
+błędu, ręczny fallback schowka oraz zatrzymanie pollingu po nieznanym stanie.
+Regresja webowa: 451 testów zaliczonych; po końcowych zmianach ponownie 297
+testów UI/eksportu. Lint, format i brak nowych migracji potwierdzone.
+Nie jest to odbiór rzeczywistego R2 ani wykonania komend w CS2.
+
+### Odbiór grup treningowych i bieżącego loadera — 2026-10-30
+
+Na osobnym PostgreSQL 16 zaliczono **572 testy** UI, wyboru/eksportu, uploadu,
+grupowania, CLI i paczek; lint/format całego `src`/`tests` oraz brak migracji.
+Python Playwright/Chromium, osobne konto i serwer 8765, Mirage i Dust2,
+1440 × 900 oraz 390 × 900: 10 zachowanych scenariuszy daje 4 treningi
+z 3/3/2/2 członkami. Wiersze mają 140 px na desktopie, 135–158 px na telefonie;
+dolna krawędź Copy CS2 commands odpowiednio 396/436 px. Bez poziomego
+przepełnienia i wyjątków JS. Uczestnicy mają spójny zapis
+`CT / awp / A Site → T / tec9 / T Spawn` z wyróżnionymi lokacjami.
+
+Potwierdzono komplet 10 członków/4 grup w ZIP, 7 członków/3 grup po odznaczeniu,
+wszystkie CFG i addytywny `training-groups.json`, nawigację grup/członków,
+bibliotekę bez duplikatów, HTTP 503 bez utraty checkboxów, częściowy wybór
+indeterminate oraz pobranie bez JS (zachowanie 1 członka albo jawne rozszerzenie
+do 3). Loader pokazuje tylko bieżący etap; zmierzone odstępy 2,503–2,504 s.
+Sprawdzono retry dopiero po błędzie, reduced motion, deadline 10 minut przed
+następnym żądaniem i przerwanie wiszącego żądania na deadline. Przy symulowanej
+awarii `complete` ponowienie wykonało **PUT raz, complete dwa razy**.
+Próby transportu/statusu były kontrolowanymi odpowiedziami przeglądarkowymi,
+nie odbiorem rzeczywistego R2 ani nowym parsowaniem. Nie zmieniono parsera,
+limitu zachowanych scenariuszy, historii ocen ani statusu `unverified_in_game`.
+
 ## Rozszerzenie zakresu: odbiór siedmiu map
 
 Plan obejmuje **Cache, Dust2, Mirage, Inferno, Nuke, Ancient i Anubis**
 (`de_cache`, `de_dust2`, `de_mirage`, `de_inferno`, `de_nuke`, `de_ancient`,
-`de_anubis`). Obecny parser i eksperymentalny eksporter obsługują Mirage i Dust2;
-pozostałe pięć map wymaga implementacji. Poniższe ustalenia i przykłady Mirage są dotychczasową
-bazą rozpoznania, nie dowodem wsparcia pozostałych map.
+`de_anubis`). Parser, CLI, web i eksperymentalny eksporter obsługują wszystkie siedem
+map przez wspólny katalog `maps.py`. Manifest jednej mapy używa
+`yprac_hub_<map>_sandbox`, mieszany `yprac_hub_multi_map_sandbox`; każdy plik
+zachowuje własną mapę/build/rewizję. Raport v3 (odczyt v2), scenariusze v1,
+reguły analizy i status `unverified_in_game` pozostają bez zmian.
+Regresja syntetyczna obejmuje siedem map, odrzucanie map poza zakresem,
+osobne wysokości Nuke, mapy plików i grup w mieszanym ZIP oraz aliasy lokacji.
+Brak lokalnych dem Cache/Inferno/Nuke/Ancient/Anubis pozostawia ich rzeczywisty
+parser i worker do odbioru. Poniższe historyczne przykłady Mirage/Dust2 nie są
+dowodem działania na rzeczywistych demach pozostałych map ani dostępności Yprac.
+
+Odbiór aplikacyjny rozszerzenia: 3141 testów zaliczonych na osobnym PostgreSQL,
+2 opt-in pominięte; test rzeczywistego lokalnego dema Dust2 uruchomiony osobno
+i zaliczony, z porównaniem XYZ/kątów/lokacji oraz procesem potomnym workera.
+Lint, format, build sdist/wheel, Django check i kontrola migracji przeszły.
+Playwright na osobnym serwerze i syntetycznym koncie: 34 widoki przy
+1440 × 900 i 390 × 900, home/historia/biblioteka oraz raport i trening dla
+każdej mapy. Potwierdzono wybór grupy obejmującej dwóch członków, otwarcie
+treningu, pobranie ZIP, dwa CFG, właściwą mapę i integrację manifestu oraz
+`unverified_in_game`. Nie było poziomego przepełnienia ani wyjątków JavaScript.
+Nie wykonywano rzeczywistego uploadu siedmiu dem ani próby CS2/Yprac.
 
 Dla każdej mapy osobno potwierdzić dostępność CS2/Sandbox w Yprac Hub,
 rzeczywistą rewizję i zgodność geometrii ze źródłowym demem. Przeprowadzić
@@ -586,3 +695,22 @@ korzysta już z części tych komend, zgodnie z opisem na początku dokumentu.
 Aktualna decyzja dopuszcza implementację na
 założeniach i odkłada dowód runtime na koniec; zmiana celu na vanilla CS2
 nadal wymaga osobnej decyzji.
+# Odbiór panelu obsługi kont
+
+Panel `/admin/` wymaga osobnego odbioru na docelowej konfiguracji:
+logowanie przez allauth z TOTP/kodem odzyskiwania, odmowa dostępu bez drugiego
+czynnika, role Support/Account Operators, świeże uwierzytelnienie przy akcjach,
+brak standardowego edytora użytkowników/haseł/Stripe i brak możliwości zmiany audytu.
+Sprawdzić wyszukiwanie wspólnego SteamID bez łączenia kont, indywidualny limit,
+wygaśnięcie ręcznego Pro, blokadę i odblokowanie bez przywrócenia starych sesji.
+Blokada nie może zmienić subskrypcji; ostrzeżenie o dalszych opłatach ma być widoczne.
+Potwierdzić doręczenie wiadomości SMTP oraz docelową domenę i działanie linków,
+obsługę błędu wysyłki/cooldownu i odświeżania Stripe bez zmiany płatności.
+Testy automatyczne z atrapami nie są dowodem odbioru produkcyjnego SMTP/Stripe.
+
+Lokalny odbiór implementacji: 1340 testów `tests/web` na odrębnej bazie
+PostgreSQL utworzonej od zera przez migracje; obejmuje panel, polityki dostępu,
+MFA, współdzielone limity uwierzytelniania i ochronę TOTP między połączeniami.
+Przeglądarka przeszła rzeczywiste logowanie hasłem i TOTP, listę/kartę konta,
+zmianę indywidualnego limitu oraz odczyt wpisu audytowego.
+To lokalna konfiguracja testowa, nie odbiór publicznego HTTPS, SMTP lub Stripe.

@@ -1,18 +1,24 @@
 import json
 import uuid
+from concurrent.futures import ThreadPoolExecutor
 from copy import deepcopy
 from io import BytesIO
+from threading import Event
 from unittest.mock import patch
 from zipfile import ZipFile
 
 import pytest
 from allauth.account.models import EmailAddress
 from django.contrib.auth import get_user_model
+from django.db import connections
 from django.test import Client
+from django.test.utils import CaptureQueriesContext
+from django.urls import reverse
 from django.utils import timezone
 
-from cs_map_trainer.exporting import export_scenario
+from cs_map_trainer.exporting import ExportError, export_scenario
 from cs_map_trainer.packs import build_pack, load_scenarios
+from cs_map_trainer.training_groups import training_groups
 from cs_map_trainer.web import services, tasks
 from cs_map_trainer.web.models import Upload
 
@@ -49,6 +55,358 @@ def pack_url(upload):
 
 def export_url(upload):
     return f"/backend/uploads/{upload.pk}/scenarios/{ids(upload)[0]}/export/"
+
+
+def checkbox_payload(upload, *, intent="download", include=None):
+    return {
+        "selection_ui": "checkboxes",
+        "intent": intent,
+        "include": ids(upload) if include is None else include,
+    }
+
+
+def manifest(response):
+    with ZipFile(BytesIO(response.content)) as archive:
+        return json.loads(archive.read("manifest.json")), archive.namelist()
+
+
+def group_payload(upload, *, partial=False):
+    _, document = services.training_result(upload.owner, upload.pk)
+    group = training_groups(document)[0]
+    data = {"selection_ui": "groups", "intent": "download", "group": [group.group_id]}
+    if partial:
+        data.pop("group")
+        data[f"partial_{group.group_id}"] = "preserve"
+        data[f"members_{group.group_id}"] = [ids(upload)[0]]
+    return data, group
+
+
+def test_group_checkbox_exports_every_member_and_additive_group_metadata(api, ready_upload):
+    data, group = group_payload(ready_upload)
+    response = api.post(reverse("selection", args=[ready_upload.pk]), data)
+    assert response.status_code == 200
+    with ZipFile(BytesIO(response.content)) as archive:
+        packed = json.loads(archive.read("manifest.json"))
+        membership = json.loads(archive.read("training-groups.json"))
+        assert packed["pack_version"] == 1
+        assert set(packed["selected_scenario_ids"]) == set(ids(ready_upload))
+        assert len(packed["entries"]) == 2
+        assert len([name for name in archive.namelist() if name.startswith("cfg/")]) == 2
+        assert membership["groups"][0]["group_id"] == group.group_id
+        assert membership["groups"][0]["selected_scenario_ids"] == group.scenario_ids
+    ready_upload.refresh_from_db()
+    assert set(ready_upload.selection["include"]) == set(ids(ready_upload))
+
+
+def test_partial_legacy_group_preserves_then_expands_all_without_losing_rejects(api, ready_upload):
+    first, second = ids(ready_upload)
+    services.save_training_selection(
+        ready_upload.owner, ready_upload.pk, {"include": [first], "reject": [second]}
+    )
+    report = api.get(reverse("report", args=[ready_upload.pk]))
+    assert report.context["training_groups"][0]["partial"] is True
+    assert b"Partial legacy selection: 1 / 2 retained" in report.content
+    data, group = group_payload(ready_upload, partial=True)
+    url = reverse("selection", args=[ready_upload.pk])
+    response = api.post(url, data)
+    assert manifest(response)[0]["selected_scenario_ids"] == [first]
+    ready_upload.refresh_from_db()
+    assert ready_upload.selection["reject"] == [second]
+    data["group"] = [group.group_id]
+    response = api.post(url, data)
+    assert set(manifest(response)[0]["selected_scenario_ids"]) == {first, second}
+    ready_upload.refresh_from_db()
+    assert ready_upload.selection["reject"] == []
+    # Reposting the same rendered form remains valid after its first successful save.
+    assert api.post(url, data).status_code == 200
+    data.pop("group")
+    response = api.post(url, data)
+    assert manifest(response)[0]["selected_scenario_ids"] == [first]
+
+
+@pytest.mark.parametrize(
+    "kind", ["unknown", "duplicate", "member", "action", "orphan", "empty", "duplicate-member"]
+)
+def test_group_post_rejects_invalid_ids_without_saving(api, ready_upload, kind):
+    data, group = group_payload(ready_upload)
+    if kind == "unknown":
+        data["group"] = ["unknown-group"]
+    elif kind == "duplicate":
+        data["group"] *= 2
+    elif kind == "empty":
+        data["group"] = []
+    elif kind == "orphan":
+        data[f"members_{group.group_id}"] = [ids(ready_upload)[0]]
+    else:
+        data[f"partial_{group.group_id}"] = "invalid" if kind == "action" else "preserve"
+        data[f"members_{group.group_id}"] = ["unknown-scenario"]
+        if kind == "duplicate-member":
+            data[f"members_{group.group_id}"] = [ids(ready_upload)[0]] * 2
+    response = api.post(reverse("selection", args=[ready_upload.pk]), data)
+    assert response.status_code == 400
+    ready_upload.refresh_from_db()
+    assert ready_upload.selection is None
+
+
+def test_group_training_navigation_and_library_use_same_all_member_groups(api, ready_upload):
+    _, document = services.training_result(ready_upload.owner, ready_upload.pk)
+    report = ready_upload.report
+    third = deepcopy(report["scenario_document"]["scenarios"][0])
+    third["scenario_id"] = "eco-opponent"
+    third["opponent"]["weapon"] = "tec9"
+    third["player"]["weapon"] = "awp"
+    report["scenario_document"]["scenarios"].append(third)
+    Upload.objects.filter(pk=ready_upload.pk).update(report=report)
+    response = api.get(reverse("training", args=[ready_upload.pk]))
+    assert response.context["current"].scenario_id == "eco-opponent"
+    assert response.context["position"] == 1
+    assert len(response.context["training_groups"]) == 2
+    assert b"Group 1 / 2" in response.content
+    following = response.context["following"]
+    response = api.get(
+        reverse("training", args=[ready_upload.pk]), {"scenario": following.scenario_id}
+    )
+    assert response.context["current_group"]["selected_count"] == 2
+    assert b"Scenarios in this group" in response.content
+    assert all(f"?scenario={sid}".encode() in response.content for sid in ids(ready_upload))
+    library = api.get("/practice/").context["page"]
+    assert len(library) == 2
+    assert library[0]["scenario"].scenario_id == "eco-opponent"
+    assert library[1]["group"]["selected_count"] == 2
+
+
+def test_group_selection_requires_owner_and_csrf(api, ready_upload):
+    data, _ = group_payload(ready_upload)
+    url = reverse("selection", args=[ready_upload.pk])
+    csrf_client = Client(enforce_csrf_checks=True)
+    csrf_client.force_login(ready_upload.owner)
+    assert csrf_client.post(url, data).status_code == 403
+    other = get_user_model().objects.create_user("other-group-user", "other-group@example.test")
+    EmailAddress.objects.create(user=other, email=other.email, verified=True, primary=True)
+    api.force_login(other)
+    assert api.post(url, data).status_code == 404
+    ready_upload.refresh_from_db()
+    assert ready_upload.selection is None
+
+
+def test_group_export_failure_keeps_all_submitted_members_and_never_saves(api, ready_upload):
+    data, _ = group_payload(ready_upload)
+    with patch("cs_map_trainer.web.services.export_scenario", side_effect=ExportError("failure")):
+        response = api.post(reverse("selection", args=[ready_upload.pk]), data)
+    assert response.status_code == 422
+    assert response.context["selected_count"] == 2
+    assert response.context["training_groups"][0]["all_selected"]
+    assert response.context["training_groups"][0]["export_failed"]
+    ready_upload.refresh_from_db()
+    assert ready_upload.selection is None
+
+
+def test_checkbox_download_saves_and_exports_same_submitted_snapshot(api, ready_upload):
+    first, second = ids(ready_upload)
+    services.save_training_selection(
+        ready_upload.owner, ready_upload.pk, {"include": [second], "reject": [first]}
+    )
+    Upload.objects.filter(pk=ready_upload.pk).update(scripts=[{"console_line": "say injected"}])
+    with patch("cs_map_trainer.parsing.DemoReader", side_effect=AssertionError("No parser")):
+        response = api.post(
+            reverse("selection", args=[ready_upload.pk]),
+            checkbox_payload(ready_upload, include=[first]),
+        )
+    assert response.status_code == 200
+    assert response["Content-Type"] == "application/zip"
+    assert "no-store" in response["Cache-Control"]
+    result, files = manifest(response)
+    assert result["selected_scenario_ids"] == [first]
+    assert result["rejected_scenario_ids"] == []
+    assert result["compatibility"] == "unverified_in_game"
+    assert {"cfg/scenario-0001.cfg", "console/scenario-0001.txt", "README.txt"} <= set(files)
+    ready_upload.refresh_from_db()
+    assert ready_upload.selection == {"include": [first], "reject": []}
+    with ZipFile(BytesIO(response.content)) as archive:
+        scenario = services.training_result(ready_upload.owner, ready_upload.pk)[1].scenarios[0]
+        assert archive.read("console/scenario-0001.txt").decode().strip() == (
+            export_scenario(scenario).console_line
+        )
+
+
+def test_checkbox_practice_saves_current_values_and_keeps_historical_rejects(api, ready_upload):
+    first, second = ids(ready_upload)
+    services.save_training_selection(
+        ready_upload.owner, ready_upload.pk, {"include": [second], "reject": [first]}
+    )
+    response = api.post(
+        reverse("selection", args=[ready_upload.pk]),
+        checkbox_payload(ready_upload, intent="practice", include=[second]),
+    )
+    assert response.url == reverse("training", args=[ready_upload.pk])
+    ready_upload.refresh_from_db()
+    assert ready_upload.selection == {"include": [second], "reject": [first]}
+    response = api.post(
+        reverse("selection", args=[ready_upload.pk]),
+        checkbox_payload(ready_upload, intent="practice", include=[first]),
+    )
+    assert response.status_code == 302
+    ready_upload.refresh_from_db()
+    assert ready_upload.selection == {"include": [first], "reject": []}
+    assert api.get(response.url).context["current"].scenario_id == first
+
+
+@pytest.mark.parametrize("accept", ["text/html", "application/json"])
+@pytest.mark.parametrize("include", [[], ["unknown"], ["second-scenario", "second-scenario"]])
+def test_checkbox_invalid_selection_preserves_saved_and_edited_values(
+    api, ready_upload, accept, include
+):
+    response = api.post(
+        reverse("selection", args=[ready_upload.pk]),
+        checkbox_payload(ready_upload, include=include),
+        HTTP_ACCEPT=accept,
+    )
+    assert response.status_code == 400
+    ready_upload.refresh_from_db()
+    assert ready_upload.selection is None
+    if accept == "text/html":
+        assert b'id="selection-form"' in response.content
+        assert response.context["selected_count"] == len(include)
+    else:
+        assert response.json()["error"] == "invalid_scenario_selection"
+
+
+@pytest.mark.parametrize("accept", ["text/html", "application/json"])
+def test_checkbox_export_failure_does_not_save_or_skip_scenario(api, ready_upload, accept):
+    with patch("cs_map_trainer.web.services.export_scenario", side_effect=ExportError("blocked")):
+        response = api.post(
+            reverse("selection", args=[ready_upload.pk]),
+            checkbox_payload(ready_upload),
+            HTTP_ACCEPT=accept,
+        )
+    assert response.status_code == 422
+    ready_upload.refresh_from_db()
+    assert ready_upload.selection is None
+    if accept == "application/json":
+        assert response.json()["scenario_ids"] == ids(ready_upload)
+    else:
+        assert b"Cannot export a member of this group" in response.content
+        assert response.context["selected_count"] == 2
+    with patch("cs_map_trainer.web.services.build_pack", side_effect=ExportError("builder failed")):
+        response = api.post(
+            reverse("selection", args=[ready_upload.pk]), checkbox_payload(ready_upload)
+        )
+    assert response.status_code == 422
+    ready_upload.refresh_from_db()
+    assert ready_upload.selection is None
+
+
+def test_checkbox_real_unsupported_scenario_is_identified_and_can_be_unchecked(api, ready_upload):
+    first, second = ids(ready_upload)
+    previous = {"include": [second], "reject": []}
+    services.save_training_selection(ready_upload.owner, ready_upload.pk, previous)
+    ready_upload.report["scenario_document"]["scenarios"][0]["player"]["view_angles"]["roll"] = 1
+    ready_upload.save(update_fields=["report"])
+    url = reverse("selection", args=[ready_upload.pk])
+    response = api.post(url, checkbox_payload(ready_upload), HTTP_ACCEPT="application/json")
+    assert response.status_code == 422
+    assert response.json() == {"error": "scenario_not_exportable", "scenario_ids": [first]}
+    ready_upload.refresh_from_db()
+    assert ready_upload.selection == previous
+    response = api.post(url, checkbox_payload(ready_upload, include=[second]))
+    assert response.status_code == 200
+    assert manifest(response)[0]["selected_scenario_ids"] == [second]
+
+
+@pytest.mark.parametrize("verified", [False, True])
+def test_checkbox_download_requires_verified_session(client, ready_upload, verified):
+    if verified:
+        client.force_login(ready_upload.owner)
+        EmailAddress.objects.filter(user=ready_upload.owner).update(verified=False)
+    response = client.post(
+        reverse("selection", args=[ready_upload.pk]), checkbox_payload(ready_upload)
+    )
+    assert response.status_code == 302
+    assert response["Content-Type"] != "application/zip"
+    ready_upload.refresh_from_db()
+    assert ready_upload.selection is None
+
+
+def test_checkbox_download_requires_csrf(user, ready_upload):
+    client = Client(enforce_csrf_checks=True)
+    client.force_login(user)
+    response = client.post(
+        reverse("selection", args=[ready_upload.pk]), checkbox_payload(ready_upload)
+    )
+    assert response.status_code == 403
+    ready_upload.refresh_from_db()
+    assert ready_upload.selection is None
+
+
+@pytest.mark.django_db(transaction=True)
+@pytest.mark.parametrize("grouped", [False, True])
+def test_concurrent_tab_cannot_replace_returned_pack_snapshot(ready_upload, grouped):
+    building, attempted = Event(), Event()
+    first, second = ids(ready_upload)
+    real_builder = services.build_pack
+
+    def build(document, **kwargs):
+        building.set()
+        assert attempted.wait(10)
+        return real_builder(document, **kwargs)
+
+    def other_tab():
+        try:
+            assert building.wait(10)
+            attempted.set()
+            return services.save_training_selection(
+                ready_upload.owner, ready_upload.pk, {"include": [second], "reject": []}
+            )
+        finally:
+            connections.close_all()
+
+    with ThreadPoolExecutor(max_workers=1) as pool:
+        other = pool.submit(other_tab)
+        with patch("cs_map_trainer.web.services.build_pack", side_effect=build):
+            submitted = [first]
+            if grouped:
+                _, document = services.training_result(ready_upload.owner, ready_upload.pk)
+                submitted = [training_groups(document)[0].group_id]
+            pack = services.submit_training_selection(
+                ready_upload.owner,
+                ready_upload.pk,
+                submitted,
+                download=True,
+                partial={} if grouped else None,
+            )
+        assert other.result(timeout=10)["selected_scenario_ids"] == [second]
+    assert set(pack.manifest.selected_scenario_ids) == ({first, second} if grouped else {first})
+    ready_upload.refresh_from_db()
+    assert ready_upload.selection["include"] == [second]
+
+
+def test_light_status_defers_result_and_preserves_full_detail_contract(api, ready_upload):
+    from django.db import connection
+
+    with CaptureQueriesContext(connection) as queries:
+        response = api.get(f"/backend/uploads/{ready_upload.pk}/status/")
+    assert response.json() == {"state": "ready", "error": None}
+    assert "no-store" in response["Cache-Control"]
+    reads = [item["sql"] for item in queries if 'FROM "trainer_upload"' in item["sql"]]
+    assert len(reads) == 1
+    for field in ("report", "scripts", "selection"):
+        assert f'"trainer_upload"."{field}"' not in reads[0]
+        assert field in api.get(f"/backend/uploads/{ready_upload.pk}/").json()
+
+
+def test_light_status_owner_session_and_deletion_guards(client, api, ready_upload):
+    path = f"/backend/uploads/{ready_upload.pk}/status/"
+    client.logout()
+    assert client.get(path).status_code == 403
+    other = get_user_model().objects.create_user("other-status", "other-status@example.test")
+    EmailAddress.objects.create(user=other, email=other.email, verified=False)
+    client.force_login(other)
+    assert client.get(path).status_code == 403
+    EmailAddress.objects.filter(user=other).update(verified=True)
+    assert client.get(path).status_code == 404
+    client.force_login(ready_upload.owner)
+    services.delete_history(ready_upload.owner, ready_upload.pk)
+    assert client.get(path).status_code == 404
 
 
 def test_default_selection_and_full_replacement(api, ready_upload):

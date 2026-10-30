@@ -7,6 +7,7 @@ import pytest
 from pydantic import ValidationError
 
 from cs_map_trainer.analysis import AnalysisReport, analyze, roster
+from cs_map_trainer.maps import SUPPORTED_MAPS
 from cs_map_trainer.parsing import DemoError
 from cs_map_trainer.scenarios import MapIdentity, ScenarioDocument
 
@@ -65,7 +66,7 @@ class FakeReader:
         return pl.DataFrame(self.location_rows)
 
 
-@pytest.fixture(params=["de_mirage", "de_dust2"])
+@pytest.fixture(params=SUPPORTED_MAPS)
 def reader(request):
     reader = FakeReader()
     reader.map = reader.map.model_copy(update={"name": request.param})

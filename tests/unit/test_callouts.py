@@ -1,6 +1,7 @@
 import pytest
 
 from cs_map_trainer.callouts import format_place_name
+from cs_map_trainer.maps import SUPPORTED_MAPS
 
 
 @pytest.mark.parametrize(
@@ -23,7 +24,7 @@ from cs_map_trainer.callouts import format_place_name
         (None, None),
     ],
 )
-@pytest.mark.parametrize("map_name", ["de_dust2", "de_mirage"])
+@pytest.mark.parametrize("map_name", SUPPORTED_MAPS)
 def test_native_place_display_labels(map_name, native, label):
     assert format_place_name(map_name, native) == label
 
@@ -38,6 +39,7 @@ def test_native_place_display_labels(map_name, native, label):
         ("Apartments", "B Apartments", "Apartments"),
     ],
 )
-def test_community_aliases_are_map_specific(native, mirage, dust2):
+@pytest.mark.parametrize("map_name", [name for name in SUPPORTED_MAPS if name != "de_mirage"])
+def test_community_aliases_are_map_specific(native, mirage, dust2, map_name):
     assert format_place_name("de_mirage", native) == mirage
-    assert format_place_name("de_dust2", native) == dust2
+    assert format_place_name(map_name, native) == dust2

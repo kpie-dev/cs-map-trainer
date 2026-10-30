@@ -24,7 +24,8 @@ def load_security_settings(**environment):
             "import json; from cs_map_trainer.web import settings as s; "
             "print(json.dumps({key: getattr(s, key) for key in "
             "['DEBUG', 'SECURE_SSL_REDIRECT', 'SECURE_PROXY_SSL_HEADER', "
-            "'SESSION_COOKIE_SECURE', 'CSRF_COOKIE_SECURE']}))",
+            "'SESSION_COOKIE_SECURE', 'CSRF_COOKIE_SECURE', "
+            "'ALLAUTH_TRUSTED_PROXY_COUNT', 'ALLAUTH_TRUSTED_CLIENT_IP_HEADER']}))",
         ],
         env=env,
         capture_output=True,
@@ -42,9 +43,13 @@ def test_production_settings_require_explicit_proxy_trust():
         "SECURE_PROXY_SSL_HEADER": None,
         "SESSION_COOKIE_SECURE": True,
         "CSRF_COOKIE_SECURE": True,
+        "ALLAUTH_TRUSTED_PROXY_COUNT": 0,
+        "ALLAUTH_TRUSTED_CLIENT_IP_HEADER": None,
     }
     settings = load_security_settings(DJANGO_TRUST_PROXY="1")
     assert settings["SECURE_PROXY_SSL_HEADER"] == ["HTTP_X_FORWARDED_PROTO", "https"]
+    assert settings["ALLAUTH_TRUSTED_PROXY_COUNT"] == 1
+    assert settings["ALLAUTH_TRUSTED_CLIENT_IP_HEADER"] is None
 
 
 def test_local_http_settings_remain_supported():
@@ -54,6 +59,7 @@ def test_local_http_settings_remain_supported():
     assert not settings["SESSION_COOKIE_SECURE"]
     assert not settings["CSRF_COOKIE_SECURE"]
     assert settings["SECURE_PROXY_SSL_HEADER"] is None
+    assert settings["ALLAUTH_TRUSTED_PROXY_COUNT"] == 0
 
 
 @pytest.mark.parametrize(

@@ -1,0 +1,46 @@
+{% extends "admin/base_site.html" %}
+{% block content %}
+<p>Account {{ target.pk }}</p>
+<section class="module">
+  <h2>Identity and access</h2>
+  <p>Active: {{ target.is_active|yesno:"Yes,No" }}. Email verified: {{ target.support_verified|yesno:"Yes,No" }}.</p>
+  <p>Joined: {{ target.date_joined }}. Last login: {{ target.last_login|default:"Never" }}.</p>
+  <p>Pro source: <strong>{{ source }}</strong>. Manual Pro expiry: {{ policy.manual_pro_until|default:"None" }}.</p>
+  <p>Used this UTC month: <strong>{{ used }}</strong>. Monthly free limit: <strong>{{ limit }}</strong>. Remaining free analyses: {{ remaining }}. Reset: {{ reset_at }}.</p>
+  <p>Pro bypasses the monthly quota only. Changing a limit never erases usage.</p>
+</section>
+<section class="module">
+  <h2>SteamID64 - unverified player identifiers, not account ownership</h2>
+  <p>Last editable suggestion: {{ last_steam|default:"None" }}. Shared identifiers do not link accounts or payments.</p>
+  <ul>{% for steam_id in steam_page %}<li>{{ steam_id }}</li>{% empty %}<li>No demos uploaded.</li>{% endfor %}</ul>
+  {% if steam_page.has_previous %}<a href="?steam_page={{ steam_page.previous_page_number }}">Previous identifiers</a>{% endif %}
+  {% if steam_page.has_next %}<a href="?steam_page={{ steam_page.next_page_number }}">More identifiers</a>{% endif %}
+</section>
+<section class="module">
+  <h2>Stripe - local snapshot, not a payment ledger</h2>
+  <p>Status: {{ billing.status|default:"None" }}. Paid through: {{ billing.paid_until|default:"None" }}. Last synchronized: {{ billing.synced_at|default:"Never" }}.</p>
+  <p>Customer: {{ billing.customer_id|default:"None" }}. Subscription: {{ billing.subscription_id|default:"None" }}. Cancel at period end: {{ billing.cancel_at_period_end|yesno:"Yes,No" }}.</p>
+  <p><strong>Blocking an account does not cancel its subscription. Charges may continue. Handle financial operations separately in Stripe.</strong></p>
+  {% for label, url in stripe_links %}<p><a href="{{ url }}" target="_blank" rel="noopener noreferrer">{{ label }}</a></p>{% endfor %}
+</section>
+<section class="module">
+  <h2>Support operations</h2>
+  {% for action, label, url in support_actions %}<p><a href="{{ url }}">{{ label }}</a></p>{% empty %}<p>No operations permitted on this account.</p>{% endfor %}
+</section>
+<section class="module">
+  <h2>Upload history</h2>
+  <table><thead><tr><th>ID</th><th>SteamID64</th><th>Created</th><th>State</th><th>Error</th></tr></thead><tbody>
+  {% for upload in uploads_page %}<tr><td>{{ upload.pk }}</td><td>{{ upload.player_steam_id }}</td><td>{{ upload.created_at }}</td><td>{{ upload.state }}</td><td>{{ upload.error_code }}</td></tr>{% empty %}<tr><td colspan="5">No uploads.</td></tr>{% endfor %}
+  </tbody></table>
+  {% if uploads_page.has_previous %}<a href="?uploads_page={{ uploads_page.previous_page_number }}">Previous uploads</a>{% endif %}
+  {% if uploads_page.has_next %}<a href="?uploads_page={{ uploads_page.next_page_number }}">More uploads</a>{% endif %}
+</section>
+<section class="module">
+  <h2>Support history</h2>
+  <table><thead><tr><th>UTC time</th><th>Operator</th><th>Action</th><th>Reason</th><th>Outcome</th><th>Error</th></tr></thead><tbody>
+  {% for entry in audit_page %}<tr><td>{{ entry.created_at }}</td><td>{{ entry.actor|default:"Deleted operator" }}</td><td>{{ entry.action }}</td><td>{{ entry.reason }}</td><td>{{ entry.outcome }}</td><td>{{ entry.error_code }}</td></tr>{% empty %}<tr><td colspan="6">No support operations.</td></tr>{% endfor %}
+  </tbody></table>
+  {% if audit_page.has_previous %}<a href="?audit_page={{ audit_page.previous_page_number }}">Previous operations</a>{% endif %}
+  {% if audit_page.has_next %}<a href="?audit_page={{ audit_page.next_page_number }}">More operations</a>{% endif %}
+</section>
+{% endblock %}

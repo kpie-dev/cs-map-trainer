@@ -16,7 +16,9 @@ from cs_map_trainer.analysis import AnalysisReport
 from cs_map_trainer.exporting import ExportError, export_scenario
 from cs_map_trainer.packs import build_pack, load_scenarios, select_scenarios
 from cs_map_trainer.scenarios import ContractModel, Identifier
+from cs_map_trainer.training_groups import expand_group_selection
 
+from .entitlements import monthly_limit, pro_access
 from .identity import lock_account
 from .models import AccountPreferences, Upload
 from .storage import R2, InvalidUpload
@@ -33,9 +35,10 @@ TERMINAL = (
 
 
 class IntakeError(ValueError):
-    def __init__(self, code, status=409):
+    def __init__(self, code, status=409, *, scenario_ids=None):
         self.code = code
         self.status = status
+        self.scenario_ids = scenario_ids or []
         super().__init__(code)
 
 
@@ -71,15 +74,15 @@ def validate_player_steam_id(player_steam_id):
 
 
 def initiate(user, request_id, size, player_steam_id, storage=None):
-    from .billing import paid_access
-
     if type(size) is not int or not 8 <= size <= 1024**3:
         raise IntakeError("invalid_demo_size", 400)
     player_steam_id = validate_player_steam_id(player_steam_id)
     storage = storage or R2()
     now = timezone.now()
     with transaction.atomic():
-        lock_account(user)
+        user = lock_account(user)
+        if not user.is_active:
+            raise IntakeError("account_blocked", 403)
         existing = Upload.objects.filter(owner=user, request_id=request_id).first()
         if existing:
             if existing.size_bytes != size or existing.player_steam_id != player_steam_id:
@@ -90,7 +93,7 @@ def initiate(user, request_id, size, player_steam_id, storage=None):
         if Upload.objects.filter(owner=user, state__in=TERMINAL, cleanup_pending=True).exists():
             raise IntakeError("input_cleanup_pending", 503)
         used = quota_used(user)
-        if used >= settings.DEMO_MONTHLY_LIMIT and not paid_access(user):
+        if used >= monthly_limit(user) and not pro_access(user):
             raise IntakeError("monthly_demo_limit", 429)
         upload = Upload(
             owner=user,
@@ -112,6 +115,9 @@ def initiate(user, request_id, size, player_steam_id, storage=None):
 def complete(user, upload_id, storage=None):
     storage = storage or R2()
     with transaction.atomic():
+        user = lock_account(user)
+        if not user.is_active:
+            raise IntakeError("account_blocked", 403)
         upload = Upload.objects.select_for_update().get(pk=upload_id, owner=user)
         if upload.state != Upload.State.UPLOADING:
             return upload
@@ -247,6 +253,13 @@ def get_training_selection(user, upload_id):
 @transaction.atomic
 def save_training_selection(user, upload_id, data):
     upload, document = training_result(user, upload_id, lock=True)
+    selection, selected = validate_training_selection(document, data)
+    upload.selection = selection.model_dump()
+    upload.save(update_fields=["selection"])
+    return selection_result(document, selection, selected)
+
+
+def validate_training_selection(document, data):
     try:
         selection = TrainingSelection.model_validate(data)
     except ValidationError as error:
@@ -255,14 +268,46 @@ def save_training_selection(user, upload_id, data):
         selected = select_scenarios(document, include=selection.include, reject=selection.reject)
     except ExportError as error:
         raise IntakeError("invalid_scenario_selection", 400) from error
+    return selection, selected
+
+
+@transaction.atomic
+def submit_training_selection(user, upload_id, included, *, download, partial=None):
+    """Build and persist one locked snapshot, retaining historical rejections."""
+    upload, document = training_result(user, upload_id, lock=True)
+    previous, _ = saved_selection(upload, document)
+    if partial is not None:
+        try:
+            included = expand_group_selection(document, included, partial)
+        except (ValueError, TypeError) as error:
+            raise IntakeError("invalid_selection_payload", 400) from error
+    selection, selected = validate_training_selection(
+        document,
+        {"include": included, "reject": [sid for sid in previous.reject if sid not in included]},
+    )
+    pack = None
+    if download:
+        failed = []
+        for scenario in selected.scenarios:
+            try:
+                export_scenario(scenario)
+            except ExportError:
+                failed.append(scenario.scenario_id)
+        if failed:
+            raise IntakeError("scenario_not_exportable", 422, scenario_ids=failed)
+        pack = build_training_pack(document, selection, include_cfg=True)
     upload.selection = selection.model_dump()
     upload.save(update_fields=["selection"])
-    return selection_result(document, selection, selected)
+    return pack
 
 
 def training_pack(user, upload_id, *, include_cfg=False):
     upload, document = training_result(user, upload_id)
     selection, _ = saved_selection(upload, document)
+    return build_training_pack(document, selection, include_cfg=include_cfg)
+
+
+def build_training_pack(document, selection, *, include_cfg):
     try:
         return build_pack(
             document,

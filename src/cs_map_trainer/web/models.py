@@ -13,6 +13,55 @@ class AccountPreferences(models.Model):
     )
 
 
+class AccountPolicy(models.Model):
+    owner = models.OneToOneField(
+        settings.AUTH_USER_MODEL, on_delete=models.CASCADE, related_name="account_policy"
+    )
+    monthly_limit_override = models.PositiveIntegerField(null=True, blank=True)
+    manual_pro_until = models.DateTimeField(null=True, blank=True)
+    session_version = models.PositiveIntegerField(default=0)
+
+    class Meta:
+        permissions = [
+            ("support_view", "View support account details"),
+            ("support_email", "Send account verification and reset links"),
+            ("support_manage", "Manage account limits, access and blocks"),
+            ("support_billing", "Refresh account billing status"),
+        ]
+
+
+class CacheEntry(models.Model):
+    cache_key = models.CharField(max_length=255, primary_key=True)
+    value = models.TextField()
+    expires = models.DateTimeField(db_index=True)
+
+    class Meta:
+        db_table = "trainer_shared_cache"
+
+
+class SupportAudit(models.Model):
+    actor = models.ForeignKey(
+        settings.AUTH_USER_MODEL, null=True, on_delete=models.SET_NULL, related_name="+"
+    )
+    target = models.ForeignKey(
+        settings.AUTH_USER_MODEL, null=True, on_delete=models.SET_NULL, related_name="+"
+    )
+    created_at = models.DateTimeField(auto_now_add=True)
+    action = models.CharField(max_length=32)
+    reason = models.CharField(max_length=500)
+    before = models.JSONField(default=dict)
+    after = models.JSONField(default=dict)
+    outcome = models.CharField(max_length=16)
+    error_code = models.CharField(max_length=64, blank=True)
+
+    class Meta:
+        ordering = ["-created_at", "-pk"]
+        indexes = [
+            models.Index(fields=["target", "-created_at"], name="support_target_time_idx"),
+            models.Index(fields=["actor", "-created_at"], name="support_actor_time_idx"),
+        ]
+
+
 class Upload(models.Model):
     class State(models.TextChoices):
         UPLOADING = "uploading"
@@ -61,7 +110,8 @@ class Upload(models.Model):
             ),
         ]
         indexes = [
-            models.Index(fields=["owner", "created_at"], name="trainer_upl_owner_i_50063e_idx")
+            models.Index(fields=["owner", "created_at"], name="trainer_upl_owner_i_50063e_idx"),
+            models.Index(fields=["player_steam_id", "owner"], name="trainer_player_owner_idx"),
         ]
 
 

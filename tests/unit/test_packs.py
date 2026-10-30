@@ -8,7 +8,7 @@ from pydantic import ValidationError
 
 from cs_map_trainer.artifacts import write_new_file
 from cs_map_trainer.exporting import ASSUMPTIONS, ExportError, export_scenario
-from cs_map_trainer.maps import SUPPORTED_MAPS
+from cs_map_trainer.maps import SUPPORTED_MAPS, map_label
 from cs_map_trainer.packs import PackManifest, build_pack, load_scenarios, select_scenarios
 from cs_map_trainer.scenarios import ScenarioDocument
 
@@ -69,6 +69,7 @@ def test_archive_manifest_and_commands(document, include_cfg):
             "manifest.json",
             "scenarios.json",
             "README.txt",
+            "training-groups.json",
             "console/scenario-0001.txt",
             "console/scenario-0002.txt",
         }
@@ -117,6 +118,33 @@ def test_legacy_mirage_manifest_remains_readable(document):
         PackManifest.model_validate_json(json.dumps(legacy)).integration
         == "yprac_hub_mirage_sandbox"
     )
+
+
+def test_seven_map_pack_preserves_each_source_and_target(training_document):
+    reference = training_document.scenarios[0]
+    scenarios = []
+    for name in SUPPORTED_MAPS:
+        scenario = reference.model_copy(deep=True)
+        scenario.scenario_id = name
+        scenario.map.name = name
+        scenarios.append(scenario)
+    document = ScenarioDocument(schema_version=1, scenarios=scenarios)
+    pack = build_pack(document, include_cfg=True)
+    assert pack.manifest.integration == "yprac_hub_multi_map_sandbox"
+    assert pack.manifest.compatibility == "unverified_in_game"
+    with ZipFile(BytesIO(pack.archive)) as archive:
+        instructions = archive.read("README.txt").decode()
+        assert ScenarioDocument.model_validate_json(archive.read("scenarios.json")) == document
+        for scenario, entry in zip(scenarios, pack.manifest.entries, strict=True):
+            assert entry.map == scenario.map
+            assert entry.source == scenario.source
+            assert f"{entry.cfg_file}: {map_label(scenario.map.name)}" in instructions
+            assert archive.read(entry.console_file).decode().strip() == (
+                export_scenario(scenario).console_line
+            )
+        groups = json.loads(archive.read("training-groups.json"))["groups"]
+        assert len(groups) == len(SUPPORTED_MAPS)
+        assert all(len(group["selected_scenario_ids"]) == 1 for group in groups)
 
 
 def test_manifest_distinguishes_omitted_from_rejected(document):

@@ -4,8 +4,22 @@ from unittest.mock import Mock
 import polars as pl
 import pytest
 
-from cs_map_trainer.maps import SUPPORTED_MAPS
+from cs_map_trainer.maps import SUPPORTED_MAP_NAMES, SUPPORTED_MAPS
 from cs_map_trainer.parsing import DemoError, DemoReader
+
+
+def test_supported_maps_match_the_product_scope():
+    assert {name: support.label for name, support in SUPPORTED_MAPS.items()} == {
+        "de_cache": "Cache",
+        "de_dust2": "Dust2",
+        "de_mirage": "Mirage",
+        "de_inferno": "Inferno",
+        "de_nuke": "Nuke",
+        "de_ancient": "Ancient",
+        "de_anubis": "Anubis",
+    }
+    for name, support in SUPPORTED_MAPS.items():
+        assert support.integration == f"yprac_hub_{name.removeprefix('de_')}_sandbox"
 
 
 def test_missing_input(tmp_path):
@@ -48,7 +62,7 @@ def test_size_limit_is_enforced_before_decoding(tmp_path, monkeypatch):
         DemoReader(path)
 
 
-@pytest.mark.parametrize("map_name", [*SUPPORTED_MAPS, "de_inferno", "de_nuke", "de_unknown"])
+@pytest.mark.parametrize("map_name", [*SUPPORTED_MAPS, "de_train", "de_overpass", "de_unknown"])
 def test_map_support_comes_from_demo_header(tmp_path, monkeypatch, map_name):
     path = tmp_path / "misleading-dust2-name.dem"
     path.write_bytes(b"PBDEMS2\x00")
@@ -62,7 +76,7 @@ def test_map_support_comes_from_demo_header(tmp_path, monkeypatch, map_name):
         assert reader.map.game_build == 123
         assert reader.map.revision == "unverified-demo-build-123"
     else:
-        with pytest.raises(DemoError, match="de_mirage, de_dust2"):
+        with pytest.raises(DemoError, match=SUPPORTED_MAP_NAMES):
             DemoReader(path)
 
 
